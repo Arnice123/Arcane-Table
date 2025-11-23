@@ -5,6 +5,7 @@ It’s designed to be fast, extensible, and fully customizable — an alternativ
 
 Arcane Table aims to be both a lightweight tactical map tool and a full rules-aware RPG engine, depending on how much automation you enable.
 
+```
 YourProject/
 │
 ├── cmake/                # CMake modules, custom find scripts
@@ -152,4 +153,4 @@ test/
 ├── client/
 ├── server/
 └── plugins/
-
+```
