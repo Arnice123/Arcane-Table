@@ -28,7 +28,9 @@ YourProject/
 ├── test/                 # Unit tests / integration tests
 │
 └── CMakeLists.txt
+```
 
+```
 engine/
 │
 ├── core/                 # Core data structures & utilities
@@ -57,7 +59,9 @@ engine/
 ├── permissions/          # Permissions and access control
 │
 └── plugin_api/           # API exposed to plugins
+```
 
+```
 client/
 │
 ├── ui/                     # Qt UI code
@@ -90,6 +94,9 @@ client/
 │   └── connection/         # Client session (Boost.Asio)
 │
 └── app/                    # Client entry point
+```
+
+```
 server/
 │
 ├── network/                # Boost.Asio server implementation
@@ -112,7 +119,9 @@ server/
 ├── plugin_host/            # Plugin loader for server-side plugins
 │
 └── app/                    # Main server entry point
+```
 
+```
 plugins/
 │
 ├── examples/
@@ -121,7 +130,9 @@ plugins/
 │   └── ui_panel/                # Example UI plugin
 │
 └── api_headers/                 # Headers required by plugin devs
+```
 
+```
 external/
 │
 ├── lua/
@@ -130,7 +141,9 @@ external/
 ├── sqlite3/
 ├── rapidjson/
 └── implot/ (optional visualization)
+```
 
+```
 assets/
 │
 ├── icons/
@@ -139,14 +152,18 @@ assets/
 ├── example_maps/
 ├── example_tokens/
 └── shaders/
+```
 
+```
 tools/
 │
 ├── asset_importer/
 ├── migration_tool/
 ├── map_processor/
 └── script_debugger/
+```
 
+```
 test/
 │
 ├── engine/
