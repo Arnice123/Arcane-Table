@@ -1,0 +1,131 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "dev-debug",
+      "displayName": "Dev: Debug",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "dev-asan",
+      "displayName": "Dev: Debug + AddressSanitizer (+UBSan where supported)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ARCANE_SANITIZE": "address;undefined"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "dev-fuzz",
+      "displayName": "Dev: libFuzzer targets (Clang)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "ARCANE_ENABLE_FUZZING": "ON",
+        "ARCANE_SANITIZE": "address"
+      }
+    },
+    {
+      "name": "ci-base",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "ARCANE_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "ci-linux-gcc",
+      "displayName": "CI: Linux GCC",
+      "inherits": "ci-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "ci-linux-clang",
+      "displayName": "CI: Linux Clang",
+      "inherits": "ci-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "ci-windows-msvc",
+      "displayName": "CI: Windows MSVC (run from a VS developer prompt)",
+      "inherits": "ci-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev-debug", "configurePreset": "dev-debug" },
+    { "name": "dev-asan", "configurePreset": "dev-asan" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "dev-fuzz", "configurePreset": "dev-fuzz" },
+    { "name": "ci-linux-gcc", "configurePreset": "ci-linux-gcc" },
+    { "name": "ci-linux-clang", "configurePreset": "ci-linux-clang" },
+    { "name": "ci-windows-msvc", "configurePreset": "ci-windows-msvc" }
+  ],
+  "testPresets": [
+    {
+      "name": "dev-debug",
+      "configurePreset": "dev-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "dev-asan",
+      "configurePreset": "dev-asan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "dev-fuzz",
+      "configurePreset": "dev-fuzz",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "ci-linux-gcc",
+      "configurePreset": "ci-linux-gcc",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "ci-linux-clang",
+      "configurePreset": "ci-linux-clang",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "ci-windows-msvc",
+      "configurePreset": "ci-windows-msvc",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

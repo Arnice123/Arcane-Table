@@ -1,0 +1,22 @@
+# Build output
+build/
+out/
+cmake-build-*/
+
+# Personal CMake settings (copy CMakeUserPresets.json.example if you add one)
+CMakeUserPresets.json
+
+# Qt Creator / IDEs
+CMakeLists.txt.user*
+*.user
+.vs/
+.vscode/
+.idea/
+
+# clangd
+.cache/
+compile_commands.json
+
+# Python (tooling scripts)
+__pycache__/
+*.pyc
