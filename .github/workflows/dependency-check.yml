@@ -1,0 +1,17 @@
+name: Dependency Boundary Check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  dependency-check:
+    name: Check Core Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check dependency boundaries
+        run: bash scripts/check-core-dependencies.sh
