@@ -97,7 +97,7 @@ public:
 			std::lock_guard lock{ state->lock };
 			if (state->is_closed) break;
 			state->is_closed = true;
-			state->cv.notify_one();
+			state->cv.notify_all();
 			return true;
 		} while (false);
 		return false;
