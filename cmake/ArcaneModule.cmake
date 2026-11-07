@@ -16,7 +16,7 @@ function(arcane_add_module name)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp")
 
-  add_library(${target} STATIC ${sources})
+  add_library(${target} STATIC ${sources} )
   add_library(arcane::${name} ALIAS ${target})
 
   target_include_directories(${target}
