@@ -97,6 +97,9 @@ bool segments_intersect(const Segment& s, const Segment& t, float epsilon)
     float sLenSq = Math::dot(sDir, sDir);
     float tLenSq = Math::dot(tDir, tDir);
 
+    float sLen = std::sqrt(sLenSq);
+    float tLen = std::sqrt(tLenSq);
+
     // Check to see if s or t is a point
     bool sPoint = sLenSq <= epsSq;
     bool tPoint = tLenSq <= epsSq;
@@ -108,13 +111,10 @@ bool segments_intersect(const Segment& s, const Segment& t, float epsilon)
     Vec2 v = t.a - s.a;
     float det = Math::cross(sDir, tDir);
 
-    if (det * det <= epsSq * sLenSq * tLenSq)
+    if (fabs(det) <= epsilon * sLen * tLen)
     {
-        // Check whether they are collinear
-        float offset = Math::cross(sDir, v);
-
         // Bounding boxes already overlap, so collinear segments overlap
-        return offset * offset <= epsSq * sLenSq;
+        return std::fabs(Math::cross(sDir, v)) <= epsilon * sLen;
     }
 
     // Calculate intersection numerators
@@ -127,9 +127,6 @@ bool segments_intersect(const Segment& s, const Segment& t, float epsilon)
         sNum = -sNum;
         tNum = -tNum;
     }
-
-    float sLen = std::sqrt(sLenSq);
-    float tLen = std::sqrt(tLenSq);
 
     // Scale numerators so tolerance is a distance
     float sScaled = sNum * sLen;

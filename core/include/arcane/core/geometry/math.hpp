@@ -14,6 +14,8 @@ constexpr Vec2 operator*(Vec2 v, float s) { return { v.x * s, v.y * s }; }
 constexpr Vec2 operator*(float s, Vec2 v) { return v * s; }
 constexpr Vec2 operator/(Vec2 v, float s) { return { v.x / s, v.y / s }; }
 
+constexpr bool operator==(Vec2 a, Vec2 b) { return a.x == b.x && a.y == b.y; }
+
 constexpr Vec2& operator+=(Vec2& a, Vec2 b) { a.x += b.x; a.y += b.y; return a; }
 constexpr Vec2& operator-=(Vec2& a, Vec2 b) { a.x -= b.x; a.y -= b.y; return a; }
 constexpr Vec2& operator*=(Vec2& v, float s) { v.x *= s; v.y *= s; return v; }
