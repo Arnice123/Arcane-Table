@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "..\..\core\include\arcane\core\util\thread_pool.hpp"
+#include "arcane\core\util\thread_pool.hpp"
 #include "check.hpp"
 
 void test_basic_submission()

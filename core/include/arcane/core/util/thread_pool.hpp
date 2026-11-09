@@ -5,7 +5,8 @@
 #include <thread>
 #include <vector>
 #include <tuple>
-#include "channel.hpp"
+
+#include "arcane\core\util\channel.hpp"
 
 class ThreadPool {
 public:

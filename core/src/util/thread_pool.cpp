@@ -1,4 +1,4 @@
-#include "..\..\include\arcane\core\util\thread_pool.hpp"
+#include "arcane\core\util\thread_pool.hpp"
 
 ThreadPool::ThreadPool(std::size_t n) : ThreadPool(n, make_channels<Job>())
 {

@@ -1,4 +1,5 @@
-#include "..\..\include\arcane\core\runtime\worker_thread.hpp"
+#include "arcane\core\runtime\worker_thread.hpp"
+
 
 WorkerThread::WorkerThread(std::string _name) : WorkerThread(_name, make_channels<Job>()) {}
 

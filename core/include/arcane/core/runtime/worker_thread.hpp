@@ -8,8 +8,8 @@
 #include <thread>
 #include <stdexcept>
 
-#include "../util/channel.hpp"
-#include "../util/named_thread.hpp"
+#include "arcane\core\util\channel.hpp"
+#include "arcane\core\util\named_thread.hpp"
 
 class WorkerThread {
 private:

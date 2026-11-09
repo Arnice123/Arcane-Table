@@ -15,6 +15,11 @@ target_include_directories(arcane_core PUBLIC
 find_package(Threads REQUIRED)
 target_link_libraries(arcane_core PUBLIC Threads::Threads)
 
+target_include_directories(arcane_core PUBLIC
+    "${CMAKE_CURRENT_BINARY_DIR}/generated"
+    "${PROJECT_SOURCE_DIR}/include"
+)
+
 # Third-party libraries are added by the story that first needs them, once the
 # package manager is chosen (spike S10 / ARCH-06). Planned for this module:
 #   PERSIST-01  SQLite (with FTS5)

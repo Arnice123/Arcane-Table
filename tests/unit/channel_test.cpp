@@ -1,4 +1,4 @@
-#include "..\..\core\include\arcane\core\util\channel.hpp"
+#include "arcane\core\util\channel.hpp"
 #include "check.hpp"
 
 #include <chrono>

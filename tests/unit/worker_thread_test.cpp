@@ -1,5 +1,5 @@
 #include "check.hpp"
-#include "..\..\core\include\arcane\core\runtime\worker_thread.hpp"
+#include "arcane\core\runtime\worker_thread.hpp"
 
 #include <atomic>
 #include <chrono>
