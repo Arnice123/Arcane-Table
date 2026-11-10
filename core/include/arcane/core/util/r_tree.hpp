@@ -1,26 +1,3 @@
-// rstar_tree.hpp — skeleton of an in-memory 2D R*-tree (Beckmann et al., SIGMOD 1990).
-//
-// Every function below is a stub with a TODO. The stubs compile (they return
-// dummy values), so you can implement one piece at a time and run the tests.
-//
-// Suggested order:
-//   1. Rect helpers (area, margin, expand, intersects, ...)
-//   2. Node::mbr, query / queryRec            -> a tree with one leaf works
-//   3. insertTop, insertAtLevel, insertRec, a simple chooseSubtree,
-//      overflowTreatment that ALWAYS splits, split  -> a working R-tree
-//   4. validate / validateRec                  -> catch bugs early
-//   5. Proper R* chooseSubtree, then forcedReinsert
-//   6. remove / removeRec
-//   7. nearest (kNN)
-//
-// Terminology:
-//   MBR   = minimum bounding rectangle (the smallest Rect containing something)
-//   M     = MaxEntries, the most entries a node may hold
-//   m     = MinEntries, the fewest entries a non-root node may hold
-//   level = height above the leaves: leaf nodes have level 0, their parents 1, ...
-//           Counting from the leaves (not from the root) means a stored level
-//           stays valid even if the root splits and the tree grows taller.
-//
 // Requirements on T (the stored value, e.g. an int id or a pointer):
 //   default-constructible, copyable, and has operator== (used by remove).
 
@@ -59,7 +36,7 @@ namespace rstar {
         // max = -FLT_MAX (use std::numeric_limits<float>::max() and ::lowest()).
         // Calling expand() on it with any Rect r gives exactly r, so it is the
         // starting value when computing the MBR of a list of rects.
-        static Rect empty() 
+        static Rect empty() {
             return Rect{ Vec2{std::numeric_limits<float>::lowest(),std::numeric_limits<float>::lowest()}, 
                          Vec2{std::numeric_limits<float>::max(),std::numeric_limits<float>::max()} };
         }
@@ -94,7 +71,7 @@ namespace rstar {
 
         // Returns a new Rect and leaves *this unchanged.
         Rect united(const Rect& o) const {
-            return {Rect{Vec2{std::min(min.x, o.min.x), std::min(min.y, o.min.y), Vec2{std::max(max.x, o.max.x), std::max(max.y, o.max.y)};
+            return { Rect{Vec2{std::min(min.x, o.min.x), std::min(min.y, o.min.y)}, Vec2{std::max(max.x, o.max.x), std::max(max.y, o.max.y)}};
         }
 
         // Returns true if *this and o overlap. Touching edges count as intersecting.
@@ -104,59 +81,44 @@ namespace rstar {
         }
 
         // Returns true if o lies completely inside *this (edges may touch).
-        // remove() uses it to decide which subtrees could hold the entry.
         bool contains(const Rect& o) const {
-            // TODO
-            (void)o;
-            return false;
+            return (min.x <= o.min.x && min.y <= o.min.y && max.x >= o.max.x && max.y >= o.max.y);
         }
 
-        // Returns the AREA of the intersection of *this and o, or 0 if they do not
-        // overlap (or only touch). The overlap width on x is
-        // min(max.x, o.max.x) - max(min.x, o.min.x); if it is <= 0, return 0.
-        // Do the same for y and return width * height.
+        // Returns the AREA of the intersection of *this and o, or 0 if they do not overlap (or only touch). 
         float overlap(const Rect& o) const {
-            // TODO
-            (void)o;
-            return 0.0f;
+            float wOverlap = std::min(max.x, o.max.x) - std::max(min.x, o.min.x);
+            //if (wOverlap < 0) return 0;
+            float hOverlap = std::min(max.y, o.max.y) - std::max(min.y, o.min.y);
+            return (wOverlap < 0 || hOverlap < 0) ? 0 : wOverlap * hOverlap;
         }
 
-        // Returns the SQUARED distance from p to the closest point of the Rect,
-        // or 0 if p is inside. For each axis, the gap is (min - p) if p is below
-        // min, (p - max) if p is above max, otherwise 0. Return gapX^2 + gapY^2.
-        // Squared distances avoid sqrt and sort the same way as real distances.
+        // Returns the SQUARED distance from p to the closest point of the Rect, or 0 if p is inside.
         float minDist2(const Vec2& p) const {
-            // TODO
-            (void)p;
-            return 0.0f;
+            float gapX = (p.x < min.x) ? min.x - p.x : (p.x > max.x) ? p.x - max.x : 0.0f;
+            float gapY = (p.y < min.y) ? min.y - p.y : (p.y > max.y) ? p.y - max.y : 0.0f;
+            return gapX * gapX + gapY * gapY;
         }
 
-        // Exact equality of both corners. validate() uses it to compare a stored
-        // MBR with a freshly computed one, and remove() uses it to find the entry.
+        // Exact equality of both corners. 
         bool operator==(const Rect& o) const {
-            // TODO
-            (void)o;
-            return false;
+            return min.x == o.min.x && min.y == o.min.y &&
+                   max.x == o.max.x && max.y == o.max.y;
         }
         bool operator!=(const Rect& o) const { return !(*this == o); }
     };
 
-    // ---------------------------------------------------------------------------
-    // R*-tree
-    // ---------------------------------------------------------------------------
     template <typename T,
         int MaxEntries = 16,                       // M
         int MinEntries = MaxEntries * 2 / 5,       // m: the paper suggests 40% of M
         int ReinsertCount = MaxEntries * 3 / 10>   // p: the paper suggests 30% of M
     class RStarTree {
-        // These guarantee that a split of M+1 entries into two groups of >= m
-        // is always possible, and that a node still has >= m entries after
-        // forced reinsertion removes p of its M+1 entries.
+        // These guarantee that a split of M+1 entries into two groups of >= m is always possible, 
+        // and that a node still has >= m entries after forced reinsertion removes p of its M+1 entries.
         static_assert(MinEntries >= 2, "MinEntries must be >= 2");
         static_assert(2 * MinEntries <= MaxEntries + 1, "split needs 2*m <= M+1");
         static_assert(ReinsertCount >= 1, "ReinsertCount must be >= 1");
-        static_assert(MaxEntries + 1 - ReinsertCount >= MinEntries,
-            "node must keep >= m entries after forced reinsertion");
+        static_assert(MaxEntries + 1 - ReinsertCount >= MinEntries, "node must keep >= m entries after forced reinsertion");
 
     public:
         // Creates an empty tree: root_ is an empty leaf (level 0), size_ is 0.
@@ -177,100 +139,77 @@ namespace rstar {
 
         // Deletes everything: replace root_ with a new empty leaf, set size_ = 0.
         void clear() {
-            // TODO
+            root_ = std::make_unique<Node>(0);
+            size_ = 0;
         }
 
-        // =======================================================================
-        // insert
-        // -----------------------------------------------------------------------
-        // Input:  the box (use Rect::fromPoint for a point) and the value to store.
-        // Result: the tree holds one more entry and size_ is one larger.
-        // Steps:
-        //   1. Build a leaf Entry {box, child = nullptr, value}.
-        //   2. ++size_.
-        //   3. insertTop(entry, 0); level 0 because data entries live in leaves.
-        // =======================================================================
+        // In:  the box (use Rect::fromPoint for a point) and the value to store.
+        // Out: the tree holds one more entry and size_ is one larger.
         void insert(const Rect& box, const T& value) {
-            // TODO
-            (void)box; (void)value;
+            Entry e{ box, nullptr, value };
+            ++size_;
+            insertTop(e, 0);
         }
 
         // Convenience overload for points.
         void insert(const Vec2& point, const T& value) { insert(Rect::fromPoint(point), value); }
 
-        // =======================================================================
-        // remove
-        // -----------------------------------------------------------------------
-        // Input:  the box and value of an entry that was inserted before.
-        // Output: true if one matching entry (box == box AND value == value) was
-        //         found and removed, false if there was no such entry.
-        // Steps:
-        //   1. Make an empty list of orphans: (Entry, level) pairs.
-        //   2. Call removeRec(root_, box, value, orphans). If it returns false,
-        //      return false.
-        //   3. --size_.
-        //   4. For each orphan, call insertTop(entry, level). These are the
-        //      entries of nodes that dropped below m and were dissolved; each one
-        //      goes back in at the level it came from. Subtree entries stay
-        //      whole subtrees; you don't re-insert their individual leaves.
-        //   5. While the root is NOT a leaf and has exactly 1 entry, make that
-        //      entry's child the new root (the tree gets one level shorter).
-        //   6. Return true.
-        // =======================================================================
+        // In:  the box and value of an entry that was inserted before.
+        // Out: true if one matching entry (box == box AND value == value) was found and removed, false if there was no such entry.
         bool remove(const Rect& box, const T& value) {
-            // TODO
-            (void)box; (void)value;
-            return false;
+            // empty list of orphans to get filled by removeRec
+            std::vector<std::pair<Entry, int>> orphans;
+            if (!removeRec(root_, box, value, orphans))
+            {
+                // if nothing was deleted return false
+                return false;
+            }
+            --size_;
+            // reinsert all entries of nodes that dropped below m (at the same level) (first = entry, second = level)
+            for (const auto& orph : orphans)
+            {
+                insertTop(orph.first, orph.second);
+            }
+            // If the root isn't a leaf and has 1 entry then shorten the tree
+            while (root_->level != 0 && root_->entries.size == 1)
+            {
+                root_ = std::move(root_->entries[0].child);
+            }
+            return true;
         }
 
         bool remove(const Vec2& point, const T& value) { return remove(Rect::fromPoint(point), value); }
 
-        // =======================================================================
-        // query (range search), callback version
-        // -----------------------------------------------------------------------
         // Input:  query rectangle q, and a callable f(const Rect& box, const T& value).
-        // Result: f is called once for every stored entry whose box intersects q,
-        //         in no particular order. The tree is not modified.
-        // Steps:  if the tree is not empty, call queryRec(root_, q, f).
-        // =======================================================================
+        // Result: f is called once for every stored entry whose box intersects q, in no particular order. The tree is not modified.
         template <typename F>
         void query(const Rect& q, F&& f) const {
-            // TODO
-            (void)q; (void)f;
+            queryRec(root_, q, f);
         }
 
-        // Same as above, but collects the matching values into a vector and
-        // returns it. Easiest way: call the callback version with a lambda
-        // that does out.push_back(value).
+        // Same as query(const Rect& q, F&& f), but collects the matching values into a vector and returns it.
         std::vector<T> query(const Rect& q) const {
-            // TODO
-            (void)q;
-            return {};
+            std::vector<T> out;
+            query(q, [&out](const Rect& box, const T& value) {out.push_back(value);});
+            return out;
         }
 
-        // =======================================================================
-        // nearest (k nearest neighbours, best-first search)
-        // -----------------------------------------------------------------------
-        // Input:  query point p, and k = how many results you want.
-        // Output: up to k (squaredDistance, value) pairs sorted nearest first.
-        //         The distance is box.minDist2(p) of the stored entry. If the tree
-        //         holds fewer than k entries, all of them are returned.
+        // (k nearest neighbours, best-first search)
+        // In:  query point p, and k = how many results you want.
+        // Out: up to k (squaredDistance, value) pairs sorted nearest first. The distance is box.minDist2(p) of the stored entry. 
+        //      If the tree holds fewer than k entries, all of them are returned.
         // Steps:
         //   1. If k == 0 or the tree is empty, return an empty vector.
-        //   2. Use a min-priority-queue of Items ordered by d (smallest d on top;
-        //      std::priority_queue with std::greater<Item>). An Item is EITHER a
-        //      node to open (node != nullptr) OR a data entry (entry != nullptr).
+        //   2. Make a min-priority-queue of Items ordered by d (smallest d on top). 
+        //      An Item is EITHER a node to open (node != nullptr) OR a data entry (entry != nullptr).
         //   3. Push {0, root_, nullptr}.
         //   4. While the queue is not empty and you have fewer than k results:
         //        pop the top Item.
-        //        - If it is a data entry: append (d, entry->value) to the results.
-        //          It is guaranteed to be the next nearest, because everything
-        //          still in the queue has distance >= d.
-        //        - If it is a node: for each of its entries, compute
-        //          e.box.minDist2(p). If the node is a leaf, push the entry as a
-        //          data Item; otherwise push e.child as a node Item.
+        //        - If it is a data entry: append (d, entry->value) to the results. 
+        //          It is guaranteed to be the next nearest, because everything still in the queue has distance >= d.
+        //        - If it is a node: for each of its entries, compute e.box.minDist2(p). 
+        //          If the node is a leaf, push the entry as a data Item; otherwise push e.child as a node Item.
         //   5. Return the results.
-        // =======================================================================
         std::vector<std::pair<float, T>> nearest(const Vec2& p, std::size_t k) const {
             struct Item {
                 float d;             // minDist2 from p to this item's box
@@ -278,32 +217,48 @@ namespace rstar {
                 const Entry* entry;  // non-null: a stored value (leaf entry)
                 bool operator>(const Item& o) const { return d > o.d; }
             };
-            // TODO
-            (void)p; (void)k;
-            return {};
+            if (k == 0 || size_ == 0) return {};
+
+            std::priority_queue<Item, std::vector<Item>, std::greater<Item>> lowestK;
+            std::vector<std::pair<float, T>> results;
+
+            lowestK.push({ 0, root_, nullptr });
+
+            while (!lowestK.empty() && results.size() < k)
+            {
+                Item itm = lowestK.top();
+                lowestK.pop();
+                if (itm.node) {
+                    for (const auto& e : itm.node->entries)
+                    {
+                        float d = e.box.minDist2(p);
+                        if (itm.node->level == 0) {
+                            lowestK.push({ d, nullptr, &e });
+                        }
+                        else {
+                            lowestK.push({ d, e.child, nullptr });
+                        }
+                    }
+                }
+                else if (itm.entry) {
+                    results.push_back({ itm.d, itm.entry->value });
+                }
+            }
+            return results;
         }
 
-        // =======================================================================
-        // validate (for debugging)
-        // -----------------------------------------------------------------------
-        // Output: true if the whole tree satisfies every invariant (see
-        //         validateRec) AND the number of leaf entries found equals size_.
-        // Call it in tests after inserts and removes; most bugs show up here first.
-        // =======================================================================
+        // Output: true if the whole tree satisfies every invariant AND the number of leaf entries found equals size_.
+        // To be called in tests after inserts and removes.
         bool validate() const {
-            // TODO: count = 0; return validateRec(root_, true, count) && count == size_;
-            return true;
+            std::size_t count = 0;
+            return validateRec(root_, true, count) && count == size_;
         }
-
     private:
         struct Node;
 
         // One slot in a node.
-        //   In a leaf node:     box = the stored item's box, value = stored value,
-        //                       child = nullptr.
-        //   In an internal node: box = MBR of the child node (must always equal
-        //                       child->mbr() exactly), child = owned child node,
-        //                       value is unused.
+        //   In a leaf node:     box = the stored item's box, value = stored value, child = nullptr.
+        //   In an internal node: box = MBR of the child node (must always equal child->mbr() exactly), child = owned child node, value is unused.
         struct Entry {
             Rect box;
             std::unique_ptr<Node> child;
@@ -322,8 +277,12 @@ namespace rstar {
             // Returns the MBR of all entries' boxes: start from Rect::empty() and
             // expand() with every entry's box.
             Rect mbr() const {
-                // TODO
-                return {};
+                Rect m = Rect::empty();
+                for (const auto& e : entries)
+                {
+                    m.expand(e.box);
+                }
+                return m;
             }
         };
 
@@ -354,8 +313,12 @@ namespace rstar {
         //      logical insertion.
         // =======================================================================
         void insertTop(Entry e, int level) {
-            // TODO
-            (void)e; (void)level;
+            reinserted_.assign(root_->level + 1, false);
+            insertAtLevel(e, level);
+            while (!pending_.empty())
+            {
+
+            }
         }
 
         // =======================================================================
@@ -523,8 +486,7 @@ namespace rstar {
         //       return true
         //   Return false if no child had it.
         // =======================================================================
-        bool removeRec(Node* node, const Rect& b, const T& v,
-            std::vector<std::pair<Entry, int>>& orphans) {
+        bool removeRec(Node* node, const Rect& b, const T& v, std::vector<std::pair<Entry, int>>& orphans) {
             // TODO
             (void)node; (void)b; (void)v; (void)orphans;
             return false;
@@ -567,5 +529,4 @@ namespace rstar {
             return true;
         }
     };
-
-}  // namespace rstar
+}  
