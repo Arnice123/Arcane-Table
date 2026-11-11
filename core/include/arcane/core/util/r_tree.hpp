@@ -32,10 +32,8 @@ namespace rstar {
         Vec2 min;  // bottom-left corner (smallest x and y)
         Vec2 max;  // top-right corner (largest x and y)
 
-        // Returns an "inverted" Rect that contains nothing: min = +FLT_MAX and
-        // max = -FLT_MAX (use std::numeric_limits<float>::max() and ::lowest()).
-        // Calling expand() on it with any Rect r gives exactly r, so it is the
-        // starting value when computing the MBR of a list of rects.
+        // Returns an "inverted" Rect that contains nothing: min = +FLT_MAX and max = -FLT_MAX
+        // Calling expand() on it with any Rect r gives exactly r, so it is the starting value when computing the MBR of a list of rects.
         static Rect empty() {
             return Rect{ Vec2{std::numeric_limits<float>::lowest(),std::numeric_limits<float>::lowest()}, 
                          Vec2{std::numeric_limits<float>::max(),std::numeric_limits<float>::max()} };
@@ -197,50 +195,42 @@ namespace rstar {
         // (k nearest neighbours, best-first search)
         // In:  query point p, and k = how many results you want.
         // Out: up to k (squaredDistance, value) pairs sorted nearest first. The distance is box.minDist2(p) of the stored entry. 
-        //      If the tree holds fewer than k entries, all of them are returned.
-        // Steps:
-        //   1. If k == 0 or the tree is empty, return an empty vector.
-        //   2. Make a min-priority-queue of Items ordered by d (smallest d on top). 
-        //      An Item is EITHER a node to open (node != nullptr) OR a data entry (entry != nullptr).
-        //   3. Push {0, root_, nullptr}.
-        //   4. While the queue is not empty and you have fewer than k results:
-        //        pop the top Item.
-        //        - If it is a data entry: append (d, entry->value) to the results. 
-        //          It is guaranteed to be the next nearest, because everything still in the queue has distance >= d.
-        //        - If it is a node: for each of its entries, compute e.box.minDist2(p). 
-        //          If the node is a leaf, push the entry as a data Item; otherwise push e.child as a node Item.
-        //   5. Return the results.
+        //         If the tree holds fewer than k entries, all of them are returned.
         std::vector<std::pair<float, T>> nearest(const Vec2& p, std::size_t k) const {
+            //      An Item is EITHER a node to open (node != nullptr) OR a data entry (entry != nullptr).
             struct Item {
                 float d;             // minDist2 from p to this item's box
                 const Node* node;    // non-null: a subtree still to open
                 const Entry* entry;  // non-null: a stored value (leaf entry)
                 bool operator>(const Item& o) const { return d > o.d; }
             };
+            // If k == 0 or the tree is empty, return an empty vector.
             if (k == 0 || size_ == 0) return {};
 
+            //A min-prio-queue of Items ordered by d(smallest d on top).
             std::priority_queue<Item, std::vector<Item>, std::greater<Item>> lowestK;
             std::vector<std::pair<float, T>> results;
 
             lowestK.push({ 0, root_, nullptr });
 
+            // While the queue is not empty and you have fewer than k results:
             while (!lowestK.empty() && results.size() < k)
             {
                 Item itm = lowestK.top();
                 lowestK.pop();
-                if (itm.node) {
+                if (itm.node) { // Node
                     for (const auto& e : itm.node->entries)
                     {
                         float d = e.box.minDist2(p);
-                        if (itm.node->level == 0) {
-                            lowestK.push({ d, nullptr, &e });
+                        if (itm.node->level == 0) { // leaf node
+                            lowestK.push({ d, nullptr, &e }); // add to q as Data Entry
                         }
                         else {
-                            lowestK.push({ d, e.child, nullptr });
+                            lowestK.push({ d, e.child, nullptr }); // add the child since e isn't a leaf
                         }
                     }
                 }
-                else if (itm.entry) {
+                else if (itm.entry) { // Data Entry
                     results.push_back({ itm.d, itm.entry->value });
                 }
             }
@@ -298,71 +288,73 @@ namespace rstar {
         // the level each must be inserted at. Processed in FIFO order by insertTop.
         std::deque<std::pair<Entry, int>> pending_;
 
-        // =======================================================================
-        // insertTop: one complete logical insertion
-        // -----------------------------------------------------------------------
-        // Input:  an entry e and the level of the node it must end up in
-        //         (0 for data entries, higher for subtrees from remove()).
-        // Result: e and every entry moved by forced reinsertion are in the tree.
-        // Steps:
-        //   1. Reset reinserted_ to (root_->level + 1) values, all false.
-        //   2. insertAtLevel(e, level).
-        //   3. While pending_ is not empty: take the front (entry, lvl), pop it,
-        //      insertAtLevel(entry, lvl). Those calls may add more to pending_,
-        //      which is fine. Do NOT reset reinserted_ here; it covers the whole
-        //      logical insertion.
-        // =======================================================================
+        // In:  an entry e and the level of the node it must end up in (0 for data entries, higher for subtrees from remove()).
+        // Outcome: e and every entry moved by forced reinsertion are in the tree.
         void insertTop(Entry e, int level) {
+            // reset reinserted so we can reinsert at all levels up to this
             reinserted_.assign(root_->level + 1, false);
             insertAtLevel(e, level);
             while (!pending_.empty())
             {
+                // take the front and insert it at (entry, lvl)
+                std::pair<Entry, int> top_ = std::move(pending_.front());
+                pending_.pop_front();
 
+                // this may cause more entries to be added to pending so keep looping
+                insertAtLevel(top_.first, top_.second);
             }
         }
 
-        // =======================================================================
-        // insertAtLevel
-        // -----------------------------------------------------------------------
-        // Input:  entry e and target level (must be <= root_->level).
-        // Result: e is placed. If the root split, the tree is one level taller.
-        // Steps:
-        //   1. sibling = insertRec(root_, e, level).
-        //   2. If sibling is not null, the root was split:
-        //        - create newRoot with level = root_->level + 1
-        //        - give it two entries: {root_->mbr(), old root} and
-        //          {sibling->mbr(), sibling}
-        //        - root_ = newRoot
-        //        - grow reinserted_ to root_->level + 1 (new values false).
-        // =======================================================================
+        // In:  entry e and target level (must be <= root_->level).
+        // Outcome: e is placed. If the root split, the tree is one level taller.
         void insertAtLevel(Entry e, int level) {
-            // TODO
-            (void)e; (void)level;
+            std::unique_ptr<Node> sibling = insertRec(root_, e, level);
+            if (sibling != nullptr) // root was split
+            {
+                //create newRoot (level = root_->level + 1) and give it two entries: {root_->mbr(), old root} and {sibling->mbr(), sibling}
+                std::unique_ptr<Node> new_root = std::make_unique<Node>(root_->level + 1);
+                new_root->entries.push_back(Entry{ root_->mbr(), std::move(root_) });
+                new_root->entries.push_back(Entry{ sibling->mbr(), std::move(sibling) });
+
+                // update the root
+                root_ = std::move(new_root);
+
+                // reset and grow reinserted
+                reinserted_.assign(root_->level + 1, false);
+            }
         }
 
-        // =======================================================================
-        // insertRec: recursive descent
-        // -----------------------------------------------------------------------
-        // Input:  current node, entry e, target level.
-        // Output: a NEW sibling node if `node` had to be split (the caller must
-        //         add it to its own entries), otherwise nullptr.
-        // Steps:
-        //   1. If node->level == level: push e into node->entries.
-        //      Otherwise:
-        //        a. i = chooseSubtree(node, e.box)
-        //        b. child = node->entries[i].child
-        //        c. sibling = insertRec(child, e, level)
-        //        d. node->entries[i].box = child->mbr()  // child may have grown,
-        //           or shrunk if it split or gave away entries to reinsertion
-        //        e. if sibling: push a new Entry {sibling->mbr(), sibling}.
-        //   2. If node now has more than M entries, return overflowTreatment(node).
-        //   3. Return nullptr.
-        // Note: get the child pointer BEFORE pushing into node->entries; pushing
-        // can reallocate the vector, so don't hold references to entries across it.
-        // =======================================================================
+
+        // In:  current node, entry e, target level.
+        // Out: a NEW sibling node if node had to be split, otherwise nullptr.
         std::unique_ptr<Node> insertRec(Node* node, Entry e, int level) {
-            // TODO
-            (void)node; (void)e; (void)level;
+            // if we are at desired level add e to entries
+            if (node->level == level) 
+            {
+                node->entries.push_back(e);
+            }
+            else
+            {
+                // choose subtre
+                std::size_t i = chooseSubtree(node, e.box);
+                Node* child = node->entries[i].child.get();
+
+                // assign sibling as the new node if we split
+                std::unique_ptr<Node> sibling = insertRec(child, e, level);
+                node->entries[i].box = child->mbr();
+
+                // if the child split re add the entry
+                if (sibling)
+                {
+                    node->entries.push_back(Entry{ sibling->mbr(), std::move(sibling) });
+                }
+            }
+
+            // if there are too many entries either split or reinsert
+            if (node->entries.size() > MaxEntries)
+            {
+                return overflowTreatment(node);
+            }
             return nullptr;
         }
 
