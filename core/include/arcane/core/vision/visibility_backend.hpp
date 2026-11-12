@@ -20,7 +20,7 @@ public:
 
 	// In: A point
 	// Out: True if point is within view
-	virtual bool contains(Vec2 point) const = default;
+	virtual bool contains(Vec2 point) const = 0;
 
 	// Out: The boundry of the viewers view 
 	virtual std::vector<Vec2> outline() const = 0;

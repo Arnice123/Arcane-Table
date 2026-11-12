@@ -12,9 +12,10 @@
 #include <queue>
 #include <tuple>
 #include <utility>
+#include <ranges>
 #include <vector>
 
-#include "core\arcane\geometry\math.hpp"
+#include "arcane\core\geometry\math.hpp"
 
 namespace rstar {
 
@@ -35,13 +36,13 @@ namespace rstar {
         // Returns an "inverted" Rect that contains nothing: min = +FLT_MAX and max = -FLT_MAX
         // Calling expand() on it with any Rect r gives exactly r, so it is the starting value when computing the MBR of a list of rects.
         static Rect empty() {
-            return Rect{ Vec2{std::numeric_limits<float>::lowest(),std::numeric_limits<float>::lowest()}, 
-                         Vec2{std::numeric_limits<float>::max(),std::numeric_limits<float>::max()} };
+            return Rect{ Vec2{std::numeric_limits<float>::max(),std::numeric_limits<float>::max()},
+                         Vec2{std::numeric_limits<float>::lowest(),std::numeric_limits<float>::lowest()} };
         }
 
         // Returns a zero-size Rect at point p (min = max = p).
         static Rect fromPoint(const Vec2& p) {
-            return Rect{p, p};
+            return Rect{ p, p };
         }
 
         // Returns width * height. A point has area 0.
@@ -55,7 +56,7 @@ namespace rstar {
         }
 
         // Returns the centre coordinate on one axis: (min + max) / 2
-        float center(int axis) const {
+        float centre(int axis) const {
             return (axisValue(max, axis) + axisValue(min, axis)) / 2;
         }
 
@@ -64,18 +65,18 @@ namespace rstar {
             min.x = std::min(min.x, o.min.x);
             min.y = std::min(min.y, o.min.y);
             max.x = std::max(max.x, o.max.x);
-            max.x = std::max(max.y, o.max.y);
+            max.y = std::max(max.y, o.max.y);
         }
 
         // Returns a new Rect and leaves *this unchanged.
         Rect united(const Rect& o) const {
-            return { Rect{Vec2{std::min(min.x, o.min.x), std::min(min.y, o.min.y)}, Vec2{std::max(max.x, o.max.x), std::max(max.y, o.max.y)}};
+            return Rect{ Vec2{std::min(min.x, o.min.x), std::min(min.y, o.min.y)}, Vec2{std::max(max.x, o.max.x), std::max(max.y, o.max.y)} };
         }
 
         // Returns true if *this and o overlap. Touching edges count as intersecting.
         bool intersects(const Rect& o) const {
             return (min.x <= o.max.x && max.x >= o.min.x &&
-            min.y <= o.max.y && max.y >= o.min.y);
+                min.y <= o.max.y && max.y >= o.min.y);
         }
 
         // Returns true if o lies completely inside *this (edges may touch).
@@ -101,7 +102,7 @@ namespace rstar {
         // Exact equality of both corners. 
         bool operator==(const Rect& o) const {
             return min.x == o.min.x && min.y == o.min.y &&
-                   max.x == o.max.x && max.y == o.max.y;
+                max.x == o.max.x && max.y == o.max.y;
         }
         bool operator!=(const Rect& o) const { return !(*this == o); }
     };
@@ -146,7 +147,7 @@ namespace rstar {
         void insert(const Rect& box, const T& value) {
             Entry e{ box, nullptr, value };
             ++size_;
-            insertTop(e, 0);
+            insertTop(std::move(e), 0);
         }
 
         // Convenience overload for points.
@@ -157,19 +158,19 @@ namespace rstar {
         bool remove(const Rect& box, const T& value) {
             // empty list of orphans to get filled by removeRec
             std::vector<std::pair<Entry, int>> orphans;
-            if (!removeRec(root_, box, value, orphans))
+            if (!removeRec(root_.get(), box, value, orphans))
             {
                 // if nothing was deleted return false
                 return false;
             }
             --size_;
             // reinsert all entries of nodes that dropped below m (at the same level) (first = entry, second = level)
-            for (const auto& orph : orphans)
+            for (auto& orph : orphans)
             {
-                insertTop(orph.first, orph.second);
+                insertTop(std::move(orph.first), orph.second);
             }
             // If the root isn't a leaf and has 1 entry then shorten the tree
-            while (root_->level != 0 && root_->entries.size == 1)
+            while (root_->level != 0 && root_->entries.size() == 1)
             {
                 root_ = std::move(root_->entries[0].child);
             }
@@ -182,7 +183,7 @@ namespace rstar {
         // Result: f is called once for every stored entry whose box intersects q, in no particular order. The tree is not modified.
         template <typename F>
         void query(const Rect& q, F&& f) const {
-            queryRec(root_, q, f);
+            queryRec(root_.get(), q, f);
         }
 
         // Same as query(const Rect& q, F&& f), but collects the matching values into a vector and returns it.
@@ -211,7 +212,7 @@ namespace rstar {
             std::priority_queue<Item, std::vector<Item>, std::greater<Item>> lowestK;
             std::vector<std::pair<float, T>> results;
 
-            lowestK.push({ 0, root_, nullptr });
+            lowestK.push({ 0, root_.get(), nullptr });
 
             // While the queue is not empty and you have fewer than k results:
             while (!lowestK.empty() && results.size() < k)
@@ -226,7 +227,7 @@ namespace rstar {
                             lowestK.push({ d, nullptr, &e }); // add to q as Data Entry
                         }
                         else {
-                            lowestK.push({ d, e.child, nullptr }); // add the child since e isn't a leaf
+                            lowestK.push({ d, e.child.get(), nullptr }); // add the child since e isn't a leaf
                         }
                     }
                 }
@@ -241,7 +242,7 @@ namespace rstar {
         // To be called in tests after inserts and removes.
         bool validate() const {
             std::size_t count = 0;
-            return validateRec(root_, true, count) && count == size_;
+            return validateRec(root_.get(), true, count) && count == size_;
         }
     private:
         struct Node;
@@ -293,7 +294,7 @@ namespace rstar {
         void insertTop(Entry e, int level) {
             // reset reinserted so we can reinsert at all levels up to this
             reinserted_.assign(root_->level + 1, false);
-            insertAtLevel(e, level);
+            insertAtLevel(std::move(e), level);
             while (!pending_.empty())
             {
                 // take the front and insert it at (entry, lvl)
@@ -301,14 +302,14 @@ namespace rstar {
                 pending_.pop_front();
 
                 // this may cause more entries to be added to pending so keep looping
-                insertAtLevel(top_.first, top_.second);
+                insertAtLevel(std::move(top_.first), top_.second);
             }
         }
 
         // In:  entry e and target level (must be <= root_->level).
         // Outcome: e is placed. If the root split, the tree is one level taller.
         void insertAtLevel(Entry e, int level) {
-            std::unique_ptr<Node> sibling = insertRec(root_, e, level);
+            std::unique_ptr<Node> sibling = insertRec(root_.get(), std::move(e), level);
             if (sibling != nullptr) // root was split
             {
                 //create newRoot (level = root_->level + 1) and give it two entries: {root_->mbr(), old root} and {sibling->mbr(), sibling}
@@ -329,9 +330,9 @@ namespace rstar {
         // Out: a NEW sibling node if node had to be split, otherwise nullptr.
         std::unique_ptr<Node> insertRec(Node* node, Entry e, int level) {
             // if we are at desired level add e to entries
-            if (node->level == level) 
+            if (node->level == level)
             {
-                node->entries.push_back(e);
+                node->entries.push_back(std::move(e));
             }
             else
             {
@@ -340,7 +341,7 @@ namespace rstar {
                 Node* child = node->entries[i].child.get();
 
                 // assign sibling as the new node if we split
-                std::unique_ptr<Node> sibling = insertRec(child, e, level);
+                std::unique_ptr<Node> sibling = insertRec(child, std::move(e), level);
                 node->entries[i].box = child->mbr();
 
                 // if the child split re add the entry
@@ -358,167 +359,256 @@ namespace rstar {
             return nullptr;
         }
 
-        // =======================================================================
-        // overflowTreatment
-        // -----------------------------------------------------------------------
-        // Input:  a node holding M+1 entries.
-        // Output: a new sibling if we split, nullptr if we reinserted instead.
-        // Steps:
-        //   If node is NOT the root and reinserted_[node->level] is false:
-        //     set it to true, call forcedReinsert(node), return nullptr.
-        //   Otherwise: return split(node).
-        // (Tip: first make this always split, so you have a plain R-tree; add
-        //  reinsertion once everything else works.)
-        // =======================================================================
+        // In:  a node holding M+1 entries.
+        // Out: a new sibling if we split, nullptr if we reinserted instead.
         std::unique_ptr<Node> overflowTreatment(Node* node) {
-            // TODO
-            (void)node;
-            return nullptr;
+            // reinsert if we haven't reinserted at this level and we aren't at the root
+            if (node != root_.get() && !reinserted_[node->level])
+            {
+                reinserted_[node->level] = true;
+                forcedReinsert(node);
+                return nullptr;
+            }
+            return split(node);
         }
 
-        // =======================================================================
-        // chooseSubtree: which child should receive a new box b?
-        // -----------------------------------------------------------------------
-        // Input:  an internal node (level >= 1) and the box b to insert.
-        // Output: index into node->entries of the chosen child.
-        // Rules:
-        //   If node->level == 1 (its children are leaves), pick the entry with the
-        //   least OVERLAP ENLARGEMENT, tie-break by least area enlargement, then
-        //   by least area:
-        //     for each entry i:
-        //       u           = entries[i].box.united(b)
-        //       overlapEnl  = sum over j != i of
-        //                     u.overlap(entries[j].box) - entries[i].box.overlap(entries[j].box)
-        //       areaEnl     = u.area() - entries[i].box.area()
-        //   If node->level > 1, pick the entry with the least AREA ENLARGEMENT,
-        //   tie-break by least area.
-        // Tip: std::tie(a, b, c) < std::tie(bestA, bestB, bestC) compares the
-        // criteria in order.
-        // Note: with only points, every overlap and area is 0, so all of these
-        // tie. A common fix is a final tie-break on the distance from b to the
-        // centre of entries[i].box.
-        // =======================================================================
+        // In:  an internal node (level >= 1) and the box b to insert.
+        // Out: index into node->entries of the chosen child that should receive a new box b
         std::size_t chooseSubtree(const Node* node, const Rect& b) const {
-            // TODO
-            (void)node; (void)b;
-            return 0;
+            const auto& es = node->entries;
+            const float inf = std::numeric_limits<float>::max();
+            std::size_t best = 0;
+
+            if (node->level == 1) // children are leaves
+            {
+                float bOv = inf, bEnl = inf, bArea = inf;
+                for (std::size_t i = 0; i < es.size(); ++i) {
+                    // rectangle that contains this entry and b
+                    Rect u = es[i].box.united(b);
+                    float ov = 0;
+
+                    // calculate how much overlap is being added 
+                    for (std::size_t j = 0; j < es.size(); ++j) {
+                        if (i == j) continue;
+                        ov += u.overlap(es[j].box) - es[i].box.overlap(es[j].box);
+                    }
+                    float area = es[i].box.area();
+                    float enl = u.area() - area;
+
+                    // Choose by overlap enlargement, tie break with area enlargement then area
+                    if (std::tie(ov, enl, area) < std::tie(bOv, bEnl, bArea)) {
+                        bOv = ov; bEnl = enl; bArea = area; best = i;
+                    }
+                }
+            }
+            else // children are not leaves
+            {
+                float bEnl = inf, bArea = inf;
+                for (std::size_t i = 0; i < es.size(); ++i) {
+                    float area = es[i].box.area();
+                    float enl = es[i].box.united(b).area() - area;
+
+                    // Choose by area enlargement, tie break with area
+                    if (std::tie(enl, area) < std::tie(bEnl, bArea)) {
+                        bEnl = enl; bArea = area; best = i;
+                    }
+                }
+            }
+            return best;
         }
 
-        // =======================================================================
-        // forcedReinsert
-        // -----------------------------------------------------------------------
-        // Input:  a non-root node with M+1 entries.
-        // Result: the node keeps M+1-p entries; the p entries FARTHEST from the
-        //         node's centre are moved into pending_ with level = node->level.
-        // Steps:
-        //   1. c = centre of node->mbr() (use center(0), center(1)).
-        //   2. Sort entries by squared distance from their box centre to c,
-        //      farthest first.
-        //   3. Move the first p entries into pending_, starting with the CLOSEST of
-        //      them (index p-1 down to 0); the paper found "close reinsert" works
-        //      better.
-        //   4. Erase those p entries from the node.
-        // The caller then recomputes this node's MBR (insertRec step 1d), which is
-        // now smaller.
-        // =======================================================================
+        // In:  a non-root node with M+1 entries.
+        // Outcome: the node keeps M+1-p entries and the p entries furthest from the node's centre are moved into pending_ with level = node->level.
         void forcedReinsert(Node* node) {
-            // TODO
-            (void)node;
+            // calculate centre pos
+            const Rect nMBR = node->mbr();
+            Vec2 ctr = { nMBR.centre(0), nMBR.centre(1) };
+
+            auto& es = node->entries;
+
+            // calculate distance to centre, order so furthest is first
+            auto dist2 = [ctr](const Rect& r) {
+                float c0 = r.centre(0) - ctr.x;
+                float c1 = r.centre(1) - ctr.y;
+                return c0 * c0 + c1 * c1;
+                };
+            std::sort(es.begin(), es.end(), [&](const Entry& a, const Entry& b) { return dist2(a.box) > dist2(b.box); });
+
+            // loop from p-1 to 0, adding them to pending, guarenteed to exist since p = M * 0.3
+            // paper says to go from closest to furthest (The R*-tree: an efficient and robust access method for points and rectangles)
+            for (int i = ReinsertCount - 1; i >= 0; --i)
+                pending_.emplace_back(std::move(es[i]), node->level);
+
+            // remove the old nodes
+            es.erase(es.begin(), es.begin() + ReinsertCount);
         }
 
-        // =======================================================================
-        // split: the R* split
-        // -----------------------------------------------------------------------
-        // Input:  a node with n = M+1 entries.
-        // Output: a new sibling Node at the same level. Both nodes end up with
-        //         >= m entries; `node` keeps group 1, the sibling gets group 2.
-        //
-        // A "distribution" is: sort the entries, then group 1 = first k entries,
-        // group 2 = the rest, for every k from m to n-m.
-        // Entries can be sorted along an axis (0 = x, 1 = y) in two ways:
-        //   by (min, then max) of that axis, or by (max, then min).
-        //
-        // Step 1: choose the split axis.
-        //   For each axis: for both sort orders, sort the entries and add up
-        //   margin(group 1 MBR) + margin(group 2 MBR) over all distributions.
-        //   Pick the axis with the SMALLEST total.
-        //
-        // Step 2: choose the split index on that axis.
-        //   For both sort orders and all distributions, pick the one with the
-        //   least overlap(group1 MBR, group2 MBR), tie-break by least
-        //   area(group1) + area(group2).
-        //
-        // Step 3: re-sort with the winning sort order, move entries [k, n) into
-        //   a new sibling node, erase them from `node`, return the sibling.
-        //
-        // Efficiency tip: after each sort, build prefix MBRs (pre[i] = MBR of
-        // entries 0..i) and suffix MBRs (suf[i] = MBR of entries i..n-1). Then
-        // group 1 = pre[k-1] and group 2 = suf[k] for every k without rescanning.
-        // =======================================================================
+
+        // In: a leaf or internal node with exactly n = M + 1 entries.
+        // Out: A new sibling Node at the same level. Both nodes end up with >= m entries; `node` keeps group 1, the sibling gets group 2.
         std::unique_ptr<Node> split(Node* node) {
-            // TODO
-            (void)node;
-            return nullptr;
+            auto& es = node->entries;
+            const std::size_t n = es.size();
+            const std::size_t m = MinEntries;
+            const float inf = std::numeric_limits<float>::max();
+
+            // sort by either taking smallest max or min depending on byHi
+            auto sortAxis = [&](int axis, bool byHi) {
+                std::sort(es.begin(), es.end(), [&](const Entry& a, const Entry& b) {
+                    if (byHi) return std::make_pair(axisValue(a.box.max, axis), axisValue(a.box.min, axis)) < std::make_pair(axisValue(b.box.max, axis), axisValue(b.box.min, axis));
+                    return std::make_pair(axisValue(a.box.min, axis), axisValue(a.box.max, axis)) < std::make_pair(axisValue(b.box.min, axis), axisValue(b.box.max, axis));
+                    });
+                };
+
+
+            // make two groups where if you take pre[i-1] and suf[i] then they reprent the MBR of all entries up to 0 to i-1 and all the entries i to n-1
+            std::vector<Rect> pre(n), suf(n);
+            auto computeMBR = [&]() {
+                pre[0] = es[0].box;
+                for (std::size_t i = 1; i < n - 1; ++i) pre[i] = pre[i - 1].united(es[i].box);
+                suf[n - 1] = es[n - 1].box;
+                for (std::size_t i = n - 1; i-- > 0;) suf[i] = suf[i + 1].united(es[i].box);
+                };
+
+            float bestMargin = inf;
+            std::size_t bestAxis = 0;
+            for (std::size_t i = 0; i < 2; ++i) // Loop through each axis
+            {
+                float marginSum = 0;
+                for (bool HiLo : {false, true})
+                {
+                    sortAxis(i, HiLo);
+                    computeMBR();
+                    for (std::size_t k = m; k <= n - m; ++k)
+                        marginSum += pre[k - 1].margin() + suf[k].margin(); // calculate the perimiter of the two boxes
+                }
+                if (marginSum < bestMargin) // choose the axis with the smallest perimiter
+                {
+                    bestMargin = marginSum;
+                    bestAxis = i;
+                }
+            }
+
+            float bOv = inf, bArea = inf;
+            bool bestByHi = false;
+            std::size_t bestK = m;
+            for (bool HiLo : {false, true})
+            {
+                sortAxis(bestAxis, HiLo);
+                computeMBR();
+                for (std::size_t k = m; k <= n - m; ++k)
+                {
+                    // calculate overlap and area, we want the smallest overlap while breaking ties with area
+                    float ov = pre[k - 1].overlap(suf[k]);
+                    float area = pre[k - 1].area() + suf[k].area();
+                    if (std::tie(ov, area) < std::tie(bOv, bArea)) {
+                        bOv = ov; bArea = area; bestByHi = HiLo; bestK = k;
+                    }
+                }
+            }
+
+            // sort by the optimal options and keep 0...bestK-1 in node and bestK...n-1 in silbing
+            sortAxis(bestAxis, bestByHi);
+            std::unique_ptr<Node> sibling = std::make_unique<Node>(node->level);
+            sibling->entries.reserve(n - bestK);
+
+            for (std::size_t k = bestK; k < n; ++k)
+            {
+                sibling->entries.push_back(std::move(es[k]));
+            }
+            es.erase(es.begin() + bestK, es.end());
+            return sibling;
         }
 
-        // =======================================================================
-        // removeRec
-        // -----------------------------------------------------------------------
-        // Input:  current node, the box and value to remove, and the orphans list.
-        // Output: true if the entry was found and removed somewhere in this subtree.
-        // Steps:
-        //   Leaf: find an entry with box == b && value == v; erase it, return true.
-        //         If none, return false.
-        //   Internal: for each entry i whose box CONTAINS b (only those can hold it):
-        //     if removeRec(child, b, v, orphans) is true:
-        //       - if child now has fewer than m entries: move each of the child's
-        //         entries into orphans as (entry, child->level), then erase
-        //         entry i (this deletes the child node)
-        //       - else: entries[i].box = child->mbr()   // it may have shrunk
-        //       return true
-        //   Return false if no child had it.
-        // =======================================================================
+        // In:  current node, the box and value to remove, and the orphans list.
+        // Out: true if the entry was found and removed somewhere in this subtree.
         bool removeRec(Node* node, const Rect& b, const T& v, std::vector<std::pair<Entry, int>>& orphans) {
-            // TODO
-            (void)node; (void)b; (void)v; (void)orphans;
+            auto& es = node->entries;
+            if (node->level == 0) { // leaf
+                for (std::size_t i = 0; i < es.size(); ++i) {
+                    if (es[i].box == b && es[i].value == v) { // if entry matches delete it and return true
+                        es.erase(es.begin() + i);
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // Internal Node
+            for (std::size_t i = 0; i < es.size(); ++i) {
+                // Make sure it contains the rec
+                if (!es[i].box.contains(b)) continue;
+
+                // if we don't remove it in the child then that means it's not in here
+                Node* child = es[i].child.get();
+                if (!removeRec(child, b, v, orphans)) continue;
+
+                // we did remove it but now we are below the min entries, add it to the orphans
+                if (child->entries.size() < MinEntries) {
+                    for (auto& entry : child->entries) {
+                        orphans.emplace_back(std::move(entry), child->level);
+                    }
+                    es.erase(es.begin() + i);
+                }
+                else { // we did remove it but now the size of the mbr is probably smaller
+                    es[i].box = es[i].child->mbr();
+                }
+                return true;
+            }
             return false;
         }
 
-        // =======================================================================
-        // queryRec
-        // -----------------------------------------------------------------------
-        // Input:  current node, query rect q, callback f.
-        // Result: f(box, value) has been called for each matching leaf entry
-        //         in this subtree.
-        // Steps:  for each entry whose box intersects q:
-        //           leaf node     -> f(entry.box, entry.value)
-        //           internal node -> queryRec(entry.child, q, f)
-        // =======================================================================
+        // In:  current node, query rect q, callback f.
+        // Outcome: Runs f(entry.box, entry.value) on each leaf entry that intersects with q
         template <typename F>
         void queryRec(const Node* node, const Rect& q, F& f) const {
-            // TODO
-            (void)node; (void)q; (void)f;
+            const auto& es = node->entries;
+            bool leaf = node->isLeaf();
+            for (const auto& e : es)
+            {
+                if (e.box.intersects(q)) {
+                    if (leaf) {
+                        f(e.box, e.value);
+                    }
+                    else {
+                        queryRec(e.child.get(), q, f);
+                    }
+                }
+            }
         }
 
-        // =======================================================================
-        // validateRec
-        // -----------------------------------------------------------------------
-        // Input:  current node, whether it is the root, and a running count.
-        // Output: false if any invariant fails in this subtree. Adds the number of
-        //         leaf entries found to `count`.
-        // Check:
+        // In:  current node, whether it is the root, and a running count.
+        // Out: false if any invariant fails in this subtree. Adds the number of leaf entries found to `count`.
+        // Checks the following:
         //   - entries.size() <= M
         //   - non-root: entries.size() >= m
         //   - root that is not a leaf: entries.size() >= 2
-        //   - leaf: no entry has a child          (then count += size, return true)
-        //   - internal: every entry has a child, child->level == node->level - 1
-        //     (so all leaves are at the same depth), entry.box == child->mbr()
-        //     exactly, and validateRec(child, false, count) is true.
+        //   - leaf: no entry has a child
+        //   - internal: every entry has a child, 
+        //               child->level == node->level - 1
+        //               entry.box == child->mbr()
+        //               validateRec(child, false, count) is true.
         // =======================================================================
         bool validateRec(const Node* node, bool isRoot, std::size_t& count) const {
-            // TODO
-            (void)node; (void)isRoot; (void)count;
+            const auto& es = node->entries;
+            if (es.size() > MaxEntries) return false;
+            if (!isRoot && es.size() < MinEntries) return false;
+            if (isRoot && !node->isLeaf() && es.size() < 2) return false;
+            if (node->isLeaf()) {
+                bool cFound = false;
+                for (const auto& e : es) {
+                    if (e.child != nullptr) return false;
+                }
+                count += es.size();
+            }
+            else {
+                for (const auto& e : es) {
+                    if (e.child == nullptr || node->level - 1 != e.child->level || !validateRec(e.child.get(), false, count) || e.box != e.child->mbr()) {
+                        return false;
+                    }
+                }
+            }
             return true;
         }
     };
-}  
+}
