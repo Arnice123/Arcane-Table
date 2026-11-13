@@ -3,19 +3,23 @@
 
 #pragma once
 
+#include <type_traits>
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <deque>
+#include <utility>
+#include <vector>
+#include <ranges>
 #include <limits>
 #include <memory>
+#include <deque>
+#include <cmath>
+#include <span>
 #include <queue>
 #include <tuple>
-#include <utility>
-#include <ranges>
-#include <vector>
 
 #include "arcane\core\geometry\math.hpp"
+#include "arcane\core\geometry\segment.hpp"
 
 namespace rstar {
 
@@ -43,6 +47,10 @@ namespace rstar {
         // Returns a zero-size Rect at point p (min = max = p).
         static Rect fromPoint(const Vec2& p) {
             return Rect{ p, p };
+        }
+
+        static Rect fromSegment(const Segment& s) {
+            return Rect{ Vec2{std::min(s.a.x, s.b.x), std::min(s.a.y, s.b.y)}, Vec2{std::max(s.a.x, s.b.x), std::max(s.a.y, s.b.y)} };
         }
 
         // Returns width * height. A point has area 0.
@@ -153,6 +161,39 @@ namespace rstar {
         // Convenience overload for points.
         void insert(const Vec2& point, const T& value) { insert(Rect::fromPoint(point), value); }
 
+        // In:  a span of (box, value) pairs, one per item.
+        // Out: the tree holds exactly these items, built bottom-up by STR packing. Anything already in the tree is discarded. size_ == items.size().
+        void bulkLoad(std::span<const std::pair<Rect, T>> items) {
+            // turn each pair into a leaf Entry {box, nullptr, value}
+            std::vector<Entry> entries;
+            entries.reserve(items.size());
+            for (const auto& i : items) {
+                entries.push_back({ i.first, nullptr, i.second });
+            }
+            buildFromLeaves(std::move(entries));
+        }
+
+        // In:  a span of segments, and a callable valueOf(std::size_t index, const Segment& s) that returns the T to store for segs[index].
+        // Out: same as above, with each segment's box = Rect::fromSegment(segs[i]).
+        template <typename F>
+        void bulkLoad(std::span<const Segment> segs, F&& valueOf) {
+            // for each entry in segs: build a leaf Entry {Rect::fromSegment(segs[i]), nullptr, valueOf(i, segs[i])}
+            std::vector<Entry> entries;
+            entries.reserve(segs.size());
+            for (std::size_t i = 0; i < segs.size(); ++i)
+                entries.push_back(Entry{ Rect::fromSegment(segs[i]), nullptr, valueOf(i, segs[i]) });
+        
+            buildFromLeaves(std::move(entries));
+        }
+
+        // In:  a span of segments.
+        // Out: same as above, storing each segment's index in the span as its value.
+        // Only exists when T can be built from a std::size_t (int ids, etc.), hence the requires clause.
+        void bulkLoad(std::span<const Segment> segs) requires std::is_constructible_v<T, std::size_t> {
+            // call the overload above with a lambda that returns static_cast<T>(i)
+            bulkLoad(segs, [](std::size_t i, [[maybe_unused]] const Segment& s) {return static_cast<T>(i);});
+        }
+
         // In:  the box and value of an entry that was inserted before.
         // Out: true if one matching entry (box == box AND value == value) was found and removed, false if there was no such entry.
         bool remove(const Rect& box, const T& value) {
@@ -189,7 +230,7 @@ namespace rstar {
         // Same as query(const Rect& q, F&& f), but collects the matching values into a vector and returns it.
         std::vector<T> query(const Rect& q) const {
             std::vector<T> out;
-            query(q, [&out](const Rect& box, const T& value) {out.push_back(value);});
+            query(q, [&out]([[maybe_unused]] const Rect& box, const T& value) {out.push_back(value);});
             return out;
         }
 
@@ -288,6 +329,69 @@ namespace rstar {
         // Entries taken out by forcedReinsert that still need to go back in, with
         // the level each must be inserted at. Processed in FIFO order by insertTop.
         std::deque<std::pair<Entry, int>> pending_;
+
+        // In:  all leaf entries (child == nullptr), in any order.
+        // Outcome: root_ is the top of a freshly packed tree containing every entry, size_ == entries.size(), pending_ is empty. An empty input gives an empty leaf root.
+        void buildFromLeaves(std::vector<Entry> entries) {
+            size_ = entries.size();
+            pending_.clear();
+            int level = 0;
+
+            // while there are still entries left, process them
+            while (entries.size() > static_cast<std::size_t>(MaxEntries))
+            {
+                entries = packLevel(std::move(entries), level);
+                ++level;
+            }
+
+            // the remaining <= M entries become the root:
+            auto root = std::make_unique<Node>(level);
+            root->entries = std::move(entries);
+            root_ = std::move(root);
+        }
+
+        // In:  n > M entries that all belong in nodes at level lvl.
+        // Out: one parent entry {node->mbr(), node} per new node, ready to be packed at level lvl + 1.
+        //      Every new node has between m and M entries.
+        //
+        // Node sizes: P = ceil(n / M) nodes. Give the first (n % P) nodes floor(n/P) + 1 entries and the rest floor(n/P).
+        //   ceil(n/P) <= M because of how P was chosen, and floor(n/P) >= m follows from 2m <= M + 1:
+        //   n >= (P-1)M + 1, so n - Pm >= (P-2)(M-1)/2 >= 0.
+        //   (Filling nodes with M each and putting the rest in the last node can leave it below m.)
+        std::vector<Entry> packLevel(std::vector<Entry> es, int lvl) {
+            // compute P, the number of slices S = ceil(sqrt(P)), base = n / P and extra = n % P
+            // start(j) = index of node j's first entry = j * base + min(j, extra), so start(P) == n
+            // sort all entries by box centre on axis 0 (x)
+            // for each slice s: it owns nodes j0 = s*P/S up to j1 = (s+1)*P/S (always whole nodes, so the sizes above still hold)
+            //     sort entries [start(j0), start(j1)) by box centre on axis 1 (y)
+            //     for each node j in [j0, j1): create Node(lvl), move entries [start(j), start(j+1)) into it,
+            //                                  push a parent Entry{node->mbr(), std::move(node)}
+            // return the parent entries
+            const std::size_t n = es.size();
+            const std::size_t P = (n + MaxEntries - 1) / MaxEntries;
+            const std::size_t S = static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(P))));
+            const std::size_t base = n / P, extra = n % P;
+
+            auto start = [&](std::size_t j) { return j * base + std::min(j, extra); };
+            auto byCentre = [](int axis) {
+                return [axis](const Entry& a, const Entry& b) { return a.box.centre(axis) < b.box.centre(axis); };
+                };
+
+            std::sort(es.begin(), es.end(), byCentre(0));
+            std::vector<Entry> parents;
+            for (std::size_t s = 0; s < S; ++s) {
+                const std::size_t j0 = s * P / S, j1 = (s + 1) * P / S;
+                if (j0 == j1) continue;
+                std::sort(es.begin() + start(j0), es.begin() + start(j1), byCentre(1));
+                for (std::size_t j = j0; j < j1; ++j) {
+                    auto node = std::make_unique<Node>(lvl);
+                    for (std::size_t i = start(j); i < start(j + 1); ++i)
+                        node->entries.push_back(std::move(es[i]));
+                    parents.push_back({ node->mbr(), std::move(node) });
+                }
+            }
+            return parents;
+        }
 
         // In:  an entry e and the level of the node it must end up in (0 for data entries, higher for subtrees from remove()).
         // Outcome: e and every entry moved by forced reinsertion are in the tree.
@@ -595,7 +699,6 @@ namespace rstar {
             if (!isRoot && es.size() < MinEntries) return false;
             if (isRoot && !node->isLeaf() && es.size() < 2) return false;
             if (node->isLeaf()) {
-                bool cFound = false;
                 for (const auto& e : es) {
                     if (e.child != nullptr) return false;
                 }

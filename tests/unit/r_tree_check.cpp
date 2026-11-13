@@ -9,12 +9,13 @@
 // and a failure always reproduces.
 
 #include "arcane\core\util\r_tree.hpp"
-#include "check.hpp"  
+#include "check.hpp"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -796,6 +797,168 @@ namespace {
     }
 
     // -------------------------------------------------------------------------
+    // Bulk load
+    // -------------------------------------------------------------------------
+
+    Segment randomSegment(Rng& r, float extent, float maxLen) {
+        Vec2 a{ r.uniform(0, extent), r.uniform(0, extent) };
+        Vec2 b{ a.x + r.uniform(-maxLen, maxLen), a.y + r.uniform(-maxLen, maxLen) };
+        return Segment{ a, b };
+    }
+
+    void testRectFromSegment() {
+        Rect r = Rect::fromSegment(Segment{ Vec2{ 3, -1 }, Vec2{ 1, 4 } });  // endpoints in any order
+        ARCANE_CHECK(r == makeRect(1, -1, 3, 4));
+        ARCANE_CHECK(Rect::fromSegment(Segment{ Vec2{ 2, 2 }, Vec2{ 2, 2 } }) == Rect::fromPoint(Vec2{ 2, 2 }));
+        ARCANE_CHECK(Rect::fromSegment(Segment{ Vec2{ 0, 5 }, Vec2{ 7, 5 } }).area() == 0);  // horizontal
+    }
+
+    void testBulkLoadEmpty() {
+        SmallTree t;
+        t.insert(Vec2{ 1, 1 }, 1);
+        std::vector<Segment> none;
+        t.bulkLoad(std::span<const Segment>(none));
+        ARCANE_CHECK(t.empty());
+        ARCANE_CHECK(t.height() == 1);
+        ARCANE_CHECK(t.validate());
+        t.insert(Vec2{ 1, 1 }, 1);
+        ARCANE_CHECK(t.validate());
+    }
+
+    // Every size from 1 to 300: covers single-leaf roots, n = M + 1, uneven
+    // node counts and partly empty slices, which is where packing goes wrong.
+    template <typename Tree>
+    void checkBulkLoadAllSizes(int maxN) {
+        Rng r(606);
+        for (int n = 1; n <= maxN; ++n) {
+            std::vector<Segment> segs;
+            for (int i = 0; i < n; ++i) segs.push_back(randomSegment(r, 100, 5));
+            Tree t;
+            t.bulkLoad(std::span<const Segment>(segs));
+            ARCANE_CHECK(t.size() == static_cast<std::size_t>(n));
+            ARCANE_CHECK(t.validate());
+        }
+    }
+
+    void testBulkLoadAllSizesSmall() { checkBulkLoadAllSizes<SmallTree>(300); }
+    void testBulkLoadAllSizesMid() { checkBulkLoadAllSizes<MidTree>(300); }
+    void testBulkLoadAllSizesDefault() { checkBulkLoadAllSizes<DefaultTree>(600); }
+
+    void testBulkLoadSegmentsMatchesBruteForce() {
+        Rng r(1234);
+        std::vector<Segment> segs;
+        std::vector<Item> items;
+        for (int i = 0; i < 5000; ++i) {
+            segs.push_back(randomSegment(r, 1000, 20));
+            items.push_back({ Rect::fromSegment(segs.back()), i });
+        }
+        DefaultTree t;
+        t.bulkLoad(std::span<const Segment>(segs));  // value = index
+        ARCANE_CHECK(t.size() == 5000);
+        ARCANE_CHECK(t.validate());
+        // Fully packed: 5000 entries at M=16 needs 3 levels plus root.
+        ARCANE_CHECK(t.height() == 4);
+        checkQueriesMatch(t, items, r, 1000);
+        for (int i = 0; i < 20; ++i)
+            checkNearestMatches(t, items, Vec2{ r.uniform(0, 1000), r.uniform(0, 1000) }, 12);
+    }
+
+    void testBulkLoadCustomValue() {
+        Rng r(77);
+        std::vector<Segment> segs;
+        for (int i = 0; i < 200; ++i) segs.push_back(randomSegment(r, 50, 3));
+        rstar::RStarTree<const Segment*, 4, 2, 1> t;
+        t.bulkLoad(std::span<const Segment>(segs), [](std::size_t, const Segment& s) { return &s; });
+        ARCANE_CHECK(t.validate());
+        int calls = 0;
+        t.query(makeRect(-100, -100, 200, 200), [&](const Rect& box, const Segment* const& sp) {
+            ++calls;
+            ARCANE_CHECK(sp >= segs.data() && sp < segs.data() + segs.size());
+            ARCANE_CHECK(box == Rect::fromSegment(*sp));
+            });
+        ARCANE_CHECK(calls == 200);
+    }
+
+    void testBulkLoadPairs() {
+        Rng r(88);
+        std::vector<std::pair<Rect, int>> pairs;
+        std::vector<Item> items;
+        for (int i = 0; i < 700; ++i) {
+            Rect b = randomBox(r, 300, 10);
+            pairs.push_back({ b, i * 3 });
+            items.push_back({ b, i * 3 });
+        }
+        MidTree t;
+        t.bulkLoad(std::span<const std::pair<Rect, int>>(pairs));
+        ARCANE_CHECK(t.size() == 700);
+        ARCANE_CHECK(t.validate());
+        checkQueriesMatch(t, items, r, 300);
+    }
+
+    void testBulkLoadReplacesContents() {
+        Rng r(99);
+        SmallTree t;
+        for (int i = 0; i < 100; ++i) t.insert(randomPointRect(r, 50), 10000 + i);
+        std::vector<Segment> segs;
+        for (int i = 0; i < 30; ++i) segs.push_back(randomSegment(r, 50, 2));
+        t.bulkLoad(std::span<const Segment>(segs));
+        ARCANE_CHECK(t.size() == 30);
+        ARCANE_CHECK(t.validate());
+        for (int v : t.query(makeRect(-100, -100, 200, 200))) ARCANE_CHECK(v >= 0 && v < 30);
+    }
+
+    void testBulkLoadThenInsertAndRemove() {
+        // The packed tree must behave as a normal tree afterwards: inserts into
+        // full nodes force splits/reinsertion straight away, removes cause
+        // underflow and orphan reinsertion.
+        Rng r(2468);
+        std::vector<Segment> segs;
+        std::vector<Item> items;
+        for (int i = 0; i < 1000; ++i) {
+            segs.push_back(randomSegment(r, 200, 6));
+            items.push_back({ Rect::fromSegment(segs.back()), i });
+        }
+        SmallTree t;
+        t.bulkLoad(std::span<const Segment>(segs));
+        ARCANE_CHECK(t.validate());
+
+        int next = 1000;
+        for (int op = 0; op < 1500; ++op) {
+            if (op % 3 != 0 || items.empty()) {
+                Rect b = Rect::fromSegment(randomSegment(r, 200, 6));
+                t.insert(b, next);
+                items.push_back({ b, next });
+                ++next;
+            }
+            else {
+                std::size_t idx = r.index(items.size());
+                ARCANE_CHECK(t.remove(items[idx].box, items[idx].value));
+                items[idx] = items.back();
+                items.pop_back();
+            }
+            ARCANE_CHECK(t.size() == items.size());
+            ARCANE_CHECK(t.validate());
+        }
+        checkQueriesMatch(t, items, r, 200);
+
+        // Remove everything that is left.
+        for (const auto& it : items) ARCANE_CHECK(t.remove(it.box, it.value));
+        ARCANE_CHECK(t.empty());
+        ARCANE_CHECK(t.height() == 1);
+        ARCANE_CHECK(t.validate());
+    }
+
+    void testBulkLoadDuplicateBoxes() {
+        // All centres equal: the sorts give no ordering at all.
+        std::vector<Segment> segs(257, Segment{ Vec2{ 1, 1 }, Vec2{ 2, 2 } });
+        SmallTree t;
+        t.bulkLoad(std::span<const Segment>(segs));
+        ARCANE_CHECK(t.size() == 257);
+        ARCANE_CHECK(t.validate());
+        ARCANE_CHECK(t.query(Rect::fromPoint(Vec2{ 1.5f, 1.5f })).size() == 257);
+    }
+
+    // -------------------------------------------------------------------------
 
     struct TestCase {
         const char* name;
@@ -852,6 +1015,18 @@ namespace {
         {"move construct and assign", testMoveConstructAndAssign},
         {"pointer values", testPointerValues},
         {"struct values", testStructValues},
+
+        {"Rect fromSegment", testRectFromSegment},
+        {"bulkLoad empty", testBulkLoadEmpty},
+        {"bulkLoad every size 1..300, M=4", testBulkLoadAllSizesSmall},
+        {"bulkLoad every size 1..300, M=8", testBulkLoadAllSizesMid},
+        {"bulkLoad every size 1..600, M=16", testBulkLoadAllSizesDefault},
+        {"bulkLoad segments vs brute force", testBulkLoadSegmentsMatchesBruteForce},
+        {"bulkLoad custom value", testBulkLoadCustomValue},
+        {"bulkLoad (box, value) pairs", testBulkLoadPairs},
+        {"bulkLoad replaces contents", testBulkLoadReplacesContents},
+        {"bulkLoad then insert and remove", testBulkLoadThenInsertAndRemove},
+        {"bulkLoad duplicate boxes", testBulkLoadDuplicateBoxes},
     };
 
 }  // namespace
