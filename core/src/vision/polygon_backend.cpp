@@ -96,31 +96,39 @@ namespace {
         }
     }
 
-    // -----------------------------------------------------------------------------------------
-    // The VisibilityField returned by compute().
-    // -----------------------------------------------------------------------------------------
     class PolygonField final : public VisibilityField {
     public:
         // In:  the viewer's origin and radius, and the polygon points (already in angle order).
         // Outcome: all three are stored (take the points by moving them in).
-        PolygonField(Vec2 origin, float radius, std::vector<Vec2> pts) {
-        }
+        PolygonField(Vec2 origin, float radius, std::vector<Vec2> pts) : origin_(origin), radius_(radius), pts_(std::move(pts)){ }
 
         // In:  a point p.
         // Out: true if p is inside the visible polygon.
-        // Algo: 1. if p is further from origin_ than radius_ (compare squared distances) → false.
-        //          The arc is made of short straight edges, so this keeps the circle edge exact.
-        //       2. even-odd rule: start with an "inside" flag set to false. Walk every edge of pts_
-        //          (each point paired with the one before it, wrapping round so the last pairs with
-        //          the first). For an edge whose two ends are on opposite sides of p's y (one above,
-        //          one not): find the x where the edge crosses that y; if it's to the right of p,
-        //          flip the flag.
         //       3. return the flag.
         bool contains(Vec2 point) const override {
+            // Reject points outside the radius.
+            if (Math::distance_squared(point, origin_) > radius_ * radius_) return false;
+
+            // go around testing pairs of edges
+            bool inside = false;
+            for (std::size_t i = 0; i < pts_.size(); ++i)
+            {
+                const Vec2& a = pts_[i];
+                const Vec2& b = pts_[(i + 1) % pts_.size()];
+                if ((a.y > point.y) == (b.y > point.y)) continue;
+
+                // Find x-coordinate where edge intersects point.y.
+                float x = a.x + (point.y - a.y) / (b.y - a.y * (b.x - a.x);
+
+                // Intersection to the right means ray crossed edge
+                if (point.x < x) inside = !inside;
+            }
+            return inside;
         }
 
         // Out: a copy of the polygon points.
         std::vector<Vec2> outline() const override {
+            return pts_);
         }
 
     private:
@@ -132,15 +140,13 @@ namespace {
 }  // namespace
 
 // Out: the backend's short name, "polygon".
-std::string_view PolygonBackend::name() const {
-}
+std::string_view PolygonBackend::name() const { return "polygon"; }
 
 // In:  every wall in the map.
 // Outcome: walls_ holds a copy of them and index_ is built over that copy.
-// Algo: copy the span into walls_ (the caller's span may not outlive this call),
-//       then bulk-load index_ from walls_ with the overload that stores each segment's index.
-//       All walls arrive at once, so bulk loading, not inserting one at a time.
 void PolygonBackend::set_occluders(std::span<const Segment> walls) {
+    index_.bulkLoad(walls);
+    walls_.assign(walls.begin(), walls.end());
 }
 
 // In:  a viewer (origin, radius).
@@ -183,7 +189,7 @@ std::unique_ptr<VisibilityField> PolygonBackend::compute(const Viewer& viewer) c
 // In:  two points a and b.
 // Out: true if no wall blocks the straight line between them.
 // Algo:
-// 1. Make the sight line a→b, pulled inward by kSightTrim at both ends:
+// 1. Make the sight line a → b, pulled inward by kSightTrim at both ends:
 //    move each end toward the other along the unit direction a→b.
 //    If a and b are closer together than 2 * kSightTrim, nothing can be between them → true.
 // 2. Query index_ with the box around the trimmed line (Rect has a helper for a segment's box).
@@ -192,4 +198,7 @@ std::unique_ptr<VisibilityField> PolygonBackend::compute(const Viewer& viewer) c
 //    is true, set it.
 // 4. Return the opposite of the flag.
 bool PolygonBackend::line_of_sight(Vec2 a, Vec2 b) const {
+    if (Math::distance_squared(a, b) < 2 * kSightTrim) return true;
+    float m = (b.y - a.y) / (b.x - a.x);
+
 }
