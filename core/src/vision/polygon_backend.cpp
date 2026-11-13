@@ -6,6 +6,7 @@
 #include <optional>
 #include <utility>
 #include <vector>
+#include <functional>
 
 
 namespace {
@@ -48,11 +49,51 @@ namespace {
 
     // In:  a segment s, a circle (centre, radius), and an output list.
     // Outcome: every point where s crosses the circle's edge is appended to out (0, 1 or 2 points).
-    // Algo: write the segment as "start + u * direction" and put that into the circle equation
-    //       (squared distance from the centre = radius squared). That gives a quadratic in u.
-    //       If the discriminant is negative (or s has zero length): no crossings.
-    //       Otherwise each root with u in [0, 1] is a crossing: append the point at that u.
     void circleCrossings(const Segment& s, Vec2 centre, float radius, std::vector<Vec2>& out) {
+        // Represent segment as P(u) = s.a + u * d, where u is in [0, 1].
+        Vec2 d = s.b - s.a;
+
+        // Quadratic coefficient a = d dot d.        
+        float a = Math::length_squared(d);
+        if (a == 0) return; // Zero-length segment cannot produce any crossings.
+
+        float circleX = s.a.x - centre.x;
+        float circleY = s.a.y - centre.y;
+
+        // Substitute P(u) into circle equation: |P(u) - centre|^2 = radius^2 which produces the quadratic: a*u^2 + b*u + c = 0.
+        float b = 2 * (circleX * d.x + circleY * d.y);
+        float c = circleX * circleX + circleY * circleY - radius * radius;
+
+        // Determine number of intersections using the discriminant.
+        float discriminant = b * b - 4 * a * c;
+
+        // Negative discriminant: line does not intersect circle.
+        if (discriminant < 0) return;
+
+        // Approximately zero discriminant: tangent intersection (one root).
+        if (discriminant < 1e-5f) {
+            float u = -b / (2 * a);
+            if (u >= 0 && u <= 1) {
+                out.push_back(s.a + u * d);
+            }
+        }
+        else {
+            // Two intersections.
+            float disc = std::sqrt(discriminant);
+
+            // use numerically stable for quadratic formula
+            float q = -0.5f * (b + std::copysign(disc, b));
+
+            float u1 = q / a;
+            float u2 = c / q;
+
+            if (u1 >= 0 && u1 <= 1) {
+                out.push_back(s.a + u1 * d);
+            }
+            if (u2 >= 0 && u2 <= 1) {
+                out.push_back(s.a + u2 * d);
+            }
+        }
     }
 
     // -----------------------------------------------------------------------------------------
