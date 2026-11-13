@@ -34,7 +34,7 @@ public:
 	virtual std::string_view name() const = 0;
 
 	// returns a list of walls that block visibility
-	virtual void set_occuluders(std::span<const Segment> walls) = 0;
+	virtual void set_occluders(std::span<const Segment> walls) = 0;
 
 	// In: A viewer
 	// Out: Outputs a field with what the viewers see

@@ -111,7 +111,7 @@ bool segments_intersect(const Segment& s, const Segment& t, float epsilon)
     Vec2 v = t.a - s.a;
     float det = Math::cross(sDir, tDir);
 
-    if (fabs(det) <= epsilon * sLen * tLen)
+    if (std::fabs(det) <= epsilon * sLen * tLen)
     {
         // Bounding boxes already overlap, so collinear segments overlap
         return std::fabs(Math::cross(sDir, v)) <= epsilon * sLen;
