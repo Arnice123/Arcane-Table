@@ -8,7 +8,9 @@ struct Vec2 {
 };
 
 constexpr Vec2 operator+(Vec2 a, Vec2 b) { return { a.x + b.x, a.y + b.y }; }
+constexpr Vec2 operator+(Vec2 a, float p) { return { a.x + p, a.y + p  }; }
 constexpr Vec2 operator-(Vec2 a, Vec2 b) { return { a.x - b.x, a.y - b.y }; }
+constexpr Vec2 operator-(Vec2 a, float p) { return { a.x - p, a.y - p }; }
 constexpr Vec2 operator-(Vec2 v) { return { -v.x, -v.y }; }
 constexpr Vec2 operator*(Vec2 v, float s) { return { v.x * s, v.y * s }; }
 constexpr Vec2 operator*(float s, Vec2 v) { return v * s; }
