@@ -66,6 +66,18 @@ if(ARCANE_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
+# Throwaway spike prototypes (ARCH-04..06). Off by default; they need Qt.
+if(ARCANE_BUILD_SPIKES)
+  if(ARCANE_CLIENT_ENABLED)
+    add_subdirectory(tools/spikes)
+  else()
+    message(WARNING
+      "ARCANE_BUILD_SPIKES=ON but the Qt client is not enabled, so the spikes "
+      "are skipped. Point CMake at Qt (-DCMAKE_PREFIX_PATH=...) or lower "
+      "-DARCANE_QT_MIN_VERSION.")
+  endif()
+endif()
+
 add_subdirectory(docs)
 
 # --- Architecture guard ---------------------------------------------------

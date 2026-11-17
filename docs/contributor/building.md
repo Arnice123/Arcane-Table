@@ -1,6 +1,6 @@
 # Building Arcane Table
 
-From a fresh clone to a running build.
+From a fresh clone to a running build. Target time: under 30 minutes.
 
 ## 1. Prerequisites
 
@@ -47,6 +47,21 @@ cmake --preset dev-debug -DCMAKE_PREFIX_PATH=C:/Qt/6.8.0/msvc2022_64
 List them with `cmake --list-presets`. Personal tweaks go in
 `CMakeUserPresets.json`, which is git-ignored.
 
+### Spike prototypes (optional)
+
+Throwaway technical-spike prototypes live under `tools/spikes/` and are **off by
+default**. They need Qt. Use a Release build for any timing numbers:
+
+```
+cmake --preset spikes-release
+cmake --build --preset spikes-release
+build/spikes-release/bin/arcane-spike-s2-hud
+```
+
+(Equivalent to adding `-DARCANE_BUILD_SPIKES=ON -DARCANE_BUILD_CLIENT=ON` to the
+`release` preset.) On Windows, `--target arcane_spike_s2_deploy_qt` copies the Qt
+DLLs next to the exe so it runs outside Qt Creator.
+
 ## 4. Where things end up
 
 Everything is under `build/<preset>/`:
@@ -85,3 +100,9 @@ If you hit either, move the code into `render/` or `ui/`, or put an interface in
 | "In-source builds are not allowed" | Use a preset; builds go in `build/` |
 | `dev-fuzz` fails to link with missing `libclang_rt` | Install your distro's Clang runtime package (Ubuntu: `libclang-rt-18-dev`) |
 | Windows: client won't start, missing Qt DLLs | Build the `arcane_deploy_qt` target, or add Qt's `bin` folder to PATH |
+
+## 8. Not decided yet
+
+Third-party dependencies (SQLite, Lua, a test framework) and the package manager
+are still open (see the architecture spike story). When that lands, this page
+will gain a "dependencies" section.

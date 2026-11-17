@@ -33,6 +33,16 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     },
     {
+      "name": "spikes-release",
+      "displayName": "Spikes: Release + technical-spike prototypes (Qt required)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ARCANE_BUILD_SPIKES": "ON",
+        "ARCANE_BUILD_CLIENT": "ON"
+      }
+    },
+    {
       "name": "dev-fuzz",
       "displayName": "Dev: libFuzzer targets (Clang)",
       "inherits": "base",
@@ -86,6 +96,7 @@
     { "name": "dev-debug", "configurePreset": "dev-debug" },
     { "name": "dev-asan", "configurePreset": "dev-asan" },
     { "name": "release", "configurePreset": "release" },
+    { "name": "spikes-release", "configurePreset": "spikes-release" },
     { "name": "dev-fuzz", "configurePreset": "dev-fuzz" },
     { "name": "ci-linux-gcc", "configurePreset": "ci-linux-gcc" },
     { "name": "ci-linux-clang", "configurePreset": "ci-linux-clang" },

@@ -5,6 +5,7 @@ option(ARCANE_BUILD_TOOLS "Build developer tools (asset packer, bundle CLI, sche
 option(ARCANE_BUILD_TESTS "Build tests (run them with ctest)" ON)
 option(ARCANE_BUILD_BENCHMARKS "Build Google Benchmark targets (needs the benchmark package)" OFF)
 option(ARCANE_ENABLE_FUZZING "Build libFuzzer targets (Clang only)" OFF)
+option(ARCANE_BUILD_SPIKES "Build throwaway technical-spike prototypes under tools/spikes (needs Qt)" OFF)
 option(ARCANE_WARNINGS_AS_ERRORS "Treat compiler warnings in Arcane code as errors" OFF)
 option(ARCANE_WIN_CONSOLE "Keep a console window for the client on Windows (handy for logs)" ON)
 
