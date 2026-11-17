@@ -87,6 +87,19 @@ namespace rstar {
                 min.y <= o.max.y && max.y >= o.min.y);
         }
 
+        // Returns true if *this and o overlap. Touching edges count as intersecting.
+        bool intersects(const Segment& s, Vec2 dirInv) const {
+            float tLx = (min.x - s.a.x) * dirInv.x;
+            float tRx = (max.x - s.a.x) * dirInv.x;
+            float tLy = (min.y - s.a.y) * dirInv.y;
+            float tRy = (max.y - s.a.y) * dirInv.y;
+            Vec2 tx(std::min(tLx, tRx), std::max(tLx, tRx));
+            Vec2 ty(std::min(tLy, tRy), std::max(tLy, tRy));
+            float tEnter = std::max({ 0.0f, tx.x, ty.x });
+            float tExit = std::min({ 1.0f, tx.y, ty.y });
+            return tEnter <= tExit;
+        }
+
         // Returns true if o lies completely inside *this (edges may touch).
         bool contains(const Rect& o) const {
             return (min.x <= o.min.x && min.y <= o.min.y && max.x >= o.max.x && max.y >= o.max.y);
@@ -232,6 +245,13 @@ namespace rstar {
             std::vector<T> out;
             query(q, [&out]([[maybe_unused]] const Rect& box, const T& value) {out.push_back(value);});
             return out;
+        }
+
+        // Input:  query rectangle q, and a callable bool f(const Rect& box, const T& value).
+        // Result: f is called once for every stored entry whose box intersects q, in no particular order. The tree is not modified.
+        template <typename F>
+        bool anySegment(const Segment& s, F&& f) const {
+            return queryRetRec(root_.get(), s, f, Vec2{ 1 / (s.b.x - s.a.x), 1 / (s.b.y - s.a.y) });
         }
 
         // (k nearest neighbours, best-first search)
@@ -679,6 +699,26 @@ namespace rstar {
                     }
                 }
             }
+        }
+
+        template <typename F>
+        bool queryRetRec(const Node* node, const Segment& s, F& f, Vec2 dirInv) const {
+            const auto& es = node->entries;
+            bool leaf = node->isLeaf();
+            for (const auto& e : es)
+            {
+                if (e.box.intersects(s, dirInv)) {
+                    bool ret = false;
+                    if (leaf) {
+                        ret = f(e.box, e.value);
+                    }
+                    else {
+                        ret = queryRetRec(e.child.get(), s, f, dirInv);                        
+                    }
+                    if (ret) return ret;
+                }
+            }
+            return false;
         }
 
         // In:  current node, whether it is the root, and a running count.

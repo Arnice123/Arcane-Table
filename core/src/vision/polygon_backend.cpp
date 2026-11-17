@@ -162,13 +162,31 @@ namespace {
         // Outcome: all three are stored (take the points by moving them in).
         PolygonField(Vec2 origin, float radius, std::vector<Vec2> pts) : origin_(origin), radius_(radius), pts_(std::move(pts)){ }
 
+        PolygonField(Vec2 origin, float radius, std::vector<Vec2> pts, std::vector<float> angles) : origin_(origin), radius_(radius), pts_(std::move(pts)), angles_(std::move(angles)){ }
+
         // In:  a point p.
         // Out: true if p is inside the visible polygon.
-        //       3. return the flag.
         bool contains(Vec2 point) const override {
+            // ensure we have enough angles
+            if (angles_.size() < 3) return false;
+
             // Reject points outside the radius.
             if (Math::distance_squared(point, origin_) > radius_ * radius_) return false;
 
+            // compute angle between point and origin
+            float pAngle = std::atan2(point.y - origin_.y, point.x - origin_.x);
+
+            // find the angle in the list of angles
+            auto it = std::upper_bound(angles_.begin(), angles_.end(), pAngle);
+            
+            // if its at the end/begin set start = angle size, end = 0 otherwise start = i - 1, end = i
+            std::size_t start, end;
+            if (it == angles_.end() || it == angles_.begin()) { start = angles_.size() - 1; end = 0; }
+            else { start = std::distance(angles_.begin(), it) - 1; end = start + 1; }
+            point = point - origin_;
+            // is the point left or right of the edge
+            return (Math::cross(pts_[end] - pts_[start], point - pts_[start]) >= 0);
+            /*
             // go around testing pairs of edges
             bool inside = false;
             for (std::size_t i = 0; i < pts_.size(); ++i)
@@ -183,18 +201,24 @@ namespace {
                 // Intersection to the right means ray crossed edge
                 if (point.x < x) inside = !inside;
             }
-            return inside;
+            return inside;*/
         }
 
         // Out: a copy of the polygon points.
         std::vector<Vec2> outline() const override {
-            return pts_;
+            std::vector<Vec2> ptCpy;
+            ptCpy.reserve(pts_.size());
+            for (const auto& p : pts_) {
+                ptCpy.push_back(p + origin_);
+            }
+            return ptCpy;
         }
 
     private:
         Vec2 origin_;
         float radius_;
         std::vector<Vec2> pts_;
+        std::vector<float> angles_;
     };
 
 }  // namespace
@@ -205,9 +229,86 @@ std::string_view PolygonBackend::name() const { return "polygon"; }
 // In:  every wall in the map.
 // Outcome: walls_ holds a copy of them and index_ is built over that copy.
 void PolygonBackend::set_occluders(std::span<const Segment> walls) {
+    // import in the list of walls
     walls_.assign(walls.begin(), walls.end());
     wallStatic_.clear();
     wallStatic_.reserve(walls.size());
+    for (const auto& w : walls_) {
+        Vec2 dir = w.b - w.a;
+        wallStatic_.push_back({ dir, Math::length(dir) });
+    }
+    index_.bulkLoad(walls_);
+
+    // compute what walls overlap
+    std::vector<std::vector<std::pair<float, Vec2>>> cutWallsList;
+    cutWallsList.resize(walls_.size());
+
+    // for each wall
+    for (std::uint32_t i = 0; i < walls_.size(); ++i) {
+        // query which walls overlap
+        index_.query(rstar::Rect::fromSegment(walls_[i]), [&](const rstar::Rect& box, const std::uint32_t& j) {
+            if (j <= i) return; // test each pair once
+
+            // if denomerator really small ignore
+            float denom = Math::cross(wallStatic_[i].dir, wallStatic_[j].dir);
+            if (std::fabs(denom) <= 1e-5 * wallStatic_[i].len * wallStatic_[j].len) return;
+            denom = 1 / denom;
+
+            // calculate s & t
+            Vec2 w = walls_[j].a - walls_[i].a;
+            float s = Math::cross(w, wallStatic_[j].dir) * denom;
+            float t = Math::cross(w, wallStatic_[i].dir) * denom;
+
+            // ensure between 0 < s, t < 1
+            if (s < 1e-5 || t < 1e-5 || s > 1 - 1e-5 || t > 1 - 1e-5) return;
+
+            // calculate colision point = start + s * dir
+            Vec2 cPoint = walls_[i].a + s * wallStatic_[i].dir;
+            cutWallsList[i].push_back(std::pair<float, Vec2>{s, cPoint});
+            cutWallsList[j].push_back(std::pair<float, Vec2>{t, cPoint});
+            });
+    }
+
+    std::vector<Segment> newWalls;
+    newWalls.reserve(walls_.size());
+    for (std::size_t i = 0; i < cutWallsList.size(); ++i) {
+        // if there are no intersections keep as is
+        if (cutWallsList[i].size() == 0) {
+            newWalls.push_back(walls_[i]);
+            continue;
+        }
+        // sort by colision point
+        std::sort(cutWallsList[i].begin(), cutWallsList[i].end(), [](const auto& a, const auto& b) {return a.first < b.first;});
+
+        // walk through constructing lines that aren't just points
+        Vec2 start = walls_[i].a;      
+        for (std::size_t j = 0; j < cutWallsList[i].size(); ++j) {
+            Segment newSeg{ start, cutWallsList[i][j].second };
+            if (Math::distance_squared(newSeg.a, newSeg.b) > 1e-10) {
+                newWalls.push_back(newSeg); 
+                start = cutWallsList[i][j].second;
+            }
+        }
+
+        // add the last endpoint
+        Segment newSeg{ start, walls_[i].b};
+        if (Math::distance_squared(newSeg.a, newSeg.b) > 1e-10) { // make sure its not a point
+            newWalls.push_back(newSeg);
+        }
+        else if (start != walls_[i].a) // if it is a point overwrite the last one
+        {
+            std::size_t endIndx = newWalls.size() - 1;
+            newWalls[endIndx] = Segment{ newWalls[endIndx].a, walls_[i].b };
+        }
+        else { // if we haven't written any then just push the old wall
+            newWalls.push_back(walls_[i]);
+        }
+    }
+
+    // update walls and tree
+    walls_.assign(newWalls.begin(), newWalls.end());
+    wallStatic_.clear();
+    wallStatic_.reserve(walls_.size());
     for (const auto& w : walls_) {
         Vec2 dir = w.b - w.a;
         wallStatic_.push_back({ dir, Math::length(dir) });
@@ -217,59 +318,34 @@ void PolygonBackend::set_occluders(std::span<const Segment> walls) {
 
 // In:  a viewer (origin, radius).
 // Out: a PolygonField describing what the viewer can see.
-// Algo:
-// 1. Nearby walls → a list of walls that reach into the circle
-//    - query index_ with the square around the viewer: origin minus radius to origin plus radius
-//      on both axes
-//    - the tree only compares boxes, so for each index it returns, keep that wall only if
-//      distToSegment2(origin, wall) is within radius squared
-//    - everything below uses only this list, never the full wall list
-//
-// 2. Points the polygon can turn at → a list of target points
-//    - for each nearby wall:
-//        * each of its two endpoints that lies inside the circle
-//        * the points from circleCrossings(wall, origin, radius, ...) where it crosses the circle edge
-//
-// 3. Ray angles → a list of angles
-//    - kArcSamples evenly spaced angles covering the full turn (from -pi, step 2*pi / count)
-//    - for each target point: its angle from the origin (atan2 of target minus origin),
-//      plus that angle - kAngleEps and that angle + kAngleEps  → 3 angles per target
-//    - reserving room first is worthwhile: 3 per target plus kArcSamples
-//
-// 4. Cast each ray → a list of (angle, hit point) pairs
-//    - unit direction from the angle (cos, sin); it must be unit length so that ray_segment_hit's result is a distance
-//    - the nearest distance starts at the radius
-//    - for each nearby wall: if ray_segment_hit gives a result, clamp it to at least 0
-//      (it can be a hair negative); if that's smaller than the nearest so far, it's the new nearest
-//    - the hit point is origin + direction * nearest; record it with its angle
-//
-// 5. Sort the pairs by angle. Their points, in that order, are the polygon.
-//    (An angle can be a hair past ±pi because of the side rays. That's fine: the polygon
-//     wraps round, so it still ends up next to its neighbours.)
-//
-// 6. Copy the points out in that order and return a new PolygonField(origin, radius, points).
 std::unique_ptr<VisibilityField> PolygonBackend::compute(const Viewer& viewer) const {
+    // find walls close enough to matter, make sure they are in the circle
     std::vector<WallRecord> nearbyWalls;
     float radius2 = viewer.radius * viewer.radius;
     index_.query(rstar::Rect::fromSegment(Segment{ Vec2{viewer.origin - viewer.radius}, Vec2{viewer.origin + viewer.radius} }), [&](const rstar::Rect&, const std::uint32_t& i) {
         float dist2 = distToSegment2(viewer.origin, walls_[i]);
         if (dist2 <= radius2) nearbyWalls.push_back(makeWallRecord(walls_[i], viewer.origin, wallStatic_[i], dist2));
         });
+
+    // sort nearest first, so the ray loop can stop once no remaining wall can be closer
     std::sort(nearbyWalls.begin(), nearbyWalls.end(), [](const auto& a, const auto& b) {return a.minDist2 < b.minDist2; });
 
+    // collect the points the outline can turn at: endpoints inside the circle and where walls cross the circle
     std::vector<Vec2> targetPoints;
     for (const auto& w : nearbyWalls) {
         Vec2 diffA = w.start - viewer.origin;
         Vec2 diffB = w.end - viewer.origin;
         if (Math::dot(diffA, diffA) <= radius2) targetPoints.push_back(w.start);
         if (Math::dot(diffB, diffB) <= radius2) targetPoints.push_back(w.end);
-        circleCrossings(Segment{ w.start, w.end}, viewer.origin, viewer.radius, targetPoints);
+        circleCrossings(Segment{ w.start, w.end }, viewer.origin, viewer.radius, targetPoints);
     }
 
+    // remove duplicate targets (corners shared by two walls), so each corner only gets one set of rays
     std::sort(targetPoints.begin(), targetPoints.end(), [](const auto& a, const auto& b) {return std::tie(a.x, a.y) < std::tie(b.x, b.y); });
     auto new_end = std::unique(targetPoints.begin(), targetPoints.end());
     targetPoints.erase(new_end, targetPoints.end());
 
+    // evenly spaced rays around the full circle, from -pi, so the radius edge is drawn as an arc. each ray is (unit direction, angle)
     const float step = 2 * kPi / kArcSamples;
     std::vector<std::pair<Vec2, float>> rays;
     rays.reserve(kArcSamples + 3 * targetPoints.size());
@@ -278,30 +354,48 @@ std::unique_ptr<VisibilityField> PolygonBackend::compute(const Viewer& viewer) c
     {
         rays.push_back(calcAngle(i * step - kPi));
     }
-    
+
+    // three rays per target: straight at it, and rotated by +/- kAngleEps to see just past each side of the corner
     for (const auto& w : targetPoints) {
-        float curAngle = std::atan2(w.y - viewer.origin.y, w.x - viewer.origin.x);
-        float cosAngle = std::cos(curAngle);
-        float sinAngle = std::sin(curAngle);
-        rays.push_back(std::pair<Vec2, float>(Vec2{cosAngle, sinAngle}, curAngle));
-        rays.push_back(std::pair<Vec2, float>(Vec2{cosAngle * kAngleEpsCos - sinAngle * kAngleEpsSin, cosAngle * kAngleEpsSin + sinAngle * kAngleEpsCos }, curAngle + kAngleEps));
-        rays.push_back(std::pair<Vec2, float>(Vec2{cosAngle * kAngleEpsCos + sinAngle * kAngleEpsSin, sinAngle * kAngleEpsCos - cosAngle * kAngleEpsSin }, curAngle - kAngleEps));
+        // direction to the target, skipping targets at the viewer's own position (no direction)
+        Vec2 offset(w.x - viewer.origin.x, w.y - viewer.origin.y);
+        float sqrLen = Math::length_squared(offset);
+        if (sqrLen < 1e-10) continue;
+        float len = 1 / std::sqrt(sqrLen);
+        Vec2 dir(offset.x * len, offset.y * len);
+
+        // the angle is only needed to sort the rays
+        float curAngle = std::atan2(offset.y, offset.x);
+        rays.push_back(std::pair<Vec2, float>(Vec2{ dir.x, dir.y }, curAngle));
+        rays.push_back(std::pair<Vec2, float>(Vec2{ dir.x * kAngleEpsCos - dir.y * kAngleEpsSin, dir.x * kAngleEpsSin + dir.y * kAngleEpsCos }, curAngle + kAngleEps));
+        rays.push_back(std::pair<Vec2, float>(Vec2{ dir.x * kAngleEpsCos + dir.y * kAngleEpsSin, dir.y * kAngleEpsCos - dir.x * kAngleEpsSin }, curAngle - kAngleEps));
     }
 
+    // sort by angle so the hit points come out in order around the viewer
     std::sort(rays.begin(), rays.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
 
+    // cast each ray: nearest wall hit, or the radius if nothing is closer
     std::vector<Vec2> hitPoints;
+    std::vector<float> angles;
+    hitPoints.reserve(rays.size());
+    angles.reserve(rays.size());
     for (const auto& ray : rays) {
         float nearestHit = viewer.radius;
         for (const auto& w : nearbyWalls) {
+            // walls are sorted by distance, so once one is further than the current hit, all the rest are too
             if (w.minDist2 > nearestHit * nearestHit) break;
             std::optional<float> rayHit = rayHitCloser(ray.first, w, nearestHit);
             if (!rayHit) continue;
             nearestHit = rayHit.value();
-        }        
-        hitPoints.push_back(viewer.origin + nearestHit * ray.first);
+        }
+
+        // store the hit relative to the viewer (keeps float precision when walls are very close)
+        hitPoints.push_back(nearestHit * ray.first);
+        angles.push_back(ray.second);
     }
-    std::unique_ptr<PolygonField> f = std::make_unique<PolygonField>(viewer.origin, viewer.radius, std::move(hitPoints));
+
+    // the hit points, in angle order, are the polygon
+    std::unique_ptr<PolygonField> f = std::make_unique<PolygonField>(viewer.origin, viewer.radius, std::move(hitPoints), std::move(angles));
     return f;
 }
 
@@ -316,11 +410,10 @@ bool PolygonBackend::line_of_sight(Vec2 a, Vec2 b) const {
     Vec2 offset = (b - a) * (kSightTrim / std::sqrt(l2));
     Segment sightLine{ a + offset, b - offset };
 
-    bool blocked = false;
     // if the segment intersects between the wall and sightline then something is in the way
-    index_.query(rstar::Rect::fromSegment(sightLine), [&](const rstar::Rect&, const std::uint32_t& i) {
-        if (blocked) return;
-        if (segments_intersect(sightLine, walls_[i])) blocked = true;
+    bool blocked = index_.anySegment(sightLine, [&](const rstar::Rect&, const std::uint32_t& i) -> bool {
+        if (segments_intersect(sightLine, walls_[i])) return true;
+        return false;
         });
 
     return !blocked;

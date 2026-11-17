@@ -10,6 +10,7 @@ arcane_add_test(unit.core.worker_thread_test SOURCES worker_thread_test.cpp LIBS
 arcane_add_test(unit.core.runtime_test SOURCES runtime_test.cpp LIBS arcane::core)
 arcane_add_test(unit.core.command_processor_test SOURCES command_processor_test.cpp LIBS arcane::core)
 arcane_add_test(unit.core.r_tree_check SOURCES r_tree_check.cpp LIBS arcane::core)
+arcane_add_test(unit.core.vision_polygon_test SOURCES vision_polygon_test.cpp LIBS arcane::core)
 
 # Prove that the headless tests link no Qt/OpenGL, directly or transitively.
 arcane_assert_no_gui_deps(test_unit_core_smoke test_unit_net_smoke)
