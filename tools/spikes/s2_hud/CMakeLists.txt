@@ -7,6 +7,8 @@
 
 # OpenGL is a dependency of OpenGLWidgets; named explicitly because the spike
 # uses the shader/buffer helpers and QOpenGLFunctions_3_3_Core from Qt6::OpenGL.
+cmake_minimum_required(VERSION 3.30)
+
 find_package(Qt6 ${ARCANE_QT_MIN_VERSION} REQUIRED COMPONENTS Widgets OpenGL OpenGLWidgets)
 
 file(GLOB sources CONFIGURE_DEPENDS
@@ -16,6 +18,10 @@ file(GLOB sources CONFIGURE_DEPENDS
 
 if(NOT sources)
   message(FATAL_ERROR "tools/spikes/s2_hud has no source files")
+endif()
+
+if(NOT TARGET arcane_sanitizers)
+  message(FATAL_ERROR "arcane_sanitizers target does not exist")
 endif()
 
 add_executable(arcane_spike_s2_hud ${sources})
