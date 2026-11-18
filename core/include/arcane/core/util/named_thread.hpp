@@ -3,7 +3,7 @@
 #include <string>
 #include <thread>
 
-#ifdef _WIN32
+#ifdef _MSC_VER
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <pthread.h>
@@ -13,7 +13,7 @@
 
 inline void set_thread_name(const std::string& name)
 {
-#ifdef _WIN32
+#ifdef _MSC_VER
     std::wstring wide_name(name.begin(), name.end());
     SetThreadDescription(
         GetCurrentThread(),

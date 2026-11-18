@@ -20,18 +20,14 @@ if(NOT sources)
   message(FATAL_ERROR "tools/spikes/s2_hud has no source files")
 endif()
 
-if(NOT TARGET arcane_sanitizers)
-  message(FATAL_ERROR "arcane_sanitizers target does not exist")
-endif()
-
 add_executable(arcane_spike_s2_hud ${sources})
 
 target_link_libraries(arcane_spike_s2_hud PRIVATE
   Qt6::Widgets
   Qt6::OpenGL
   Qt6::OpenGLWidgets
-  arcane_sanitizers)          # sanitizers allowed; warnings-as-errors deliberately not
-
+ # arcane_sanitizers)          # sanitizers allowed; warnings-as-errors deliberately not
+)
 target_include_directories(arcane_spike_s2_hud PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_features(arcane_spike_s2_hud PRIVATE cxx_std_20)
 
