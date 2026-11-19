@@ -4,6 +4,8 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QWidget>
+#include <QPixmap>
+#include <QImage>
 
 #include "hud_test_scene.hpp"
 #include "frame_stats.hpp"
@@ -30,4 +32,10 @@ protected:
     void wheelEvent(QWheelEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
+private:
+    Camera camera_;
+    FrameStats stats_;
+    QWidget* parent_;
+    HudMode mode_ = HudMode::None;
+    std::size_t count_;
 };
