@@ -14,7 +14,9 @@ find_package(Qt6 ${ARCANE_QT_MIN_VERSION} REQUIRED COMPONENTS Widgets OpenGL Ope
 file(GLOB sources CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/*.hpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/*.qrc")
+  "${CMAKE_CURRENT_SOURCE_DIR}/*.qrc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/*.vert"
+  "${CMAKE_CURRENT_SOURCE_DIR}/*.frag")
 
 if(NOT sources)
   message(FATAL_ERROR "tools/spikes/s2_hud has no source files")

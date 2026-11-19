@@ -1,149 +1,114 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <random>
 #include <string>
-#include <vector>
-#include <cstdint>
-#include <cstddef>
 #include <utility>
+#include <vector>
 
 #include <QPointF>
-#include <QSize>
 #include <QRectF>
+#include <QSize>
 
-struct FakeToken
-{
-    // position on map in world units
-	float world_x;
-	float world_y;
-
-    // nameplate name
-	std::string name;
-
-    // 0..1 for healthbar
-	float hp_frac;
+struct FakeToken {
+    float world_x;
+    float world_y;
+    std::string name;
+    float hp_frac;      // 0..1
 };
 
 struct Camera {
-    // world point at the center of screen
-	float pan_x;
-	float pan_y;
-	float zoom;
+    float pan_x = 640.0f;   // center of the 1280x720 world
+    float pan_y = 360.0f;
+    float zoom  = 1.0f;
 
-    // In: world coords and canvas size in pixels
-    // Out: Pixel coords
     QPointF world_to_screen(QPointF world, QSize canvas_size) const {
-        qreal offsetX = (world.x() - pan_x) * zoom;
-        qreal offsetY = (world.y() - pan_y) * zoom;
-        return QPointF(canvas_size.rwidth() / 2 + offsetX, canvas_size.rheight() / 2 + offsetY);
+        return QPointF(canvas_size.width()  / 2.0 + (world.x() - pan_x) * zoom,
+                       canvas_size.height() / 2.0 + (world.y() - pan_y) * zoom);
     }
 
     QPointF screen_to_world(QPointF screen, QSize canvas_size) const {
-        return QPointF(
-            (screen.x() - canvas_size.width() / 2.0) / zoom + pan_x,
-            (screen.y() - canvas_size.height() / 2.0) / zoom + pan_y
-            );
+        return QPointF((screen.x() - canvas_size.width()  / 2.0) / zoom + pan_x,
+                       (screen.y() - canvas_size.height() / 2.0) / zoom + pan_y);
     }
 };
 
 struct HudLayout {
-    // SCREEN-space (logical px). Fixed on the window, do not move with the camera.
-    std::array<QRectF, 10> hotbar_slots;   // 48x48 each, bottom center, 4 px gaps
-    QRectF combat_strip;                   // about 600x32, top center
+    std::array<QRectF, 10> hotbar_slots;
+    QRectF combat_strip;
+    QRectF nameplate_rect;
+    QRectF hp_bar_rect;
 
-    // WORLD-space (world units), relative to a token's position. Move and scale with the map.
-    QRectF nameplate_rect;                 // about 48x14, floating just above the token
-    QRectF hp_bar_rect;                    // about 40x3 inside it; fill width = hp_fraction * width
-
-    // Builds the layout for a given window size.
     static HudLayout compute(QSize canvas_size) {
         HudLayout layout{};
 
         const float w = canvas_size.width();
-        const float h = canvas_size.width();
+        const float h = canvas_size.height();
 
-        // Hotbar
         constexpr float SLOT_SIZE = 48.0f;
         constexpr float SLOT_GAP = 4.0f;
-        constexpr int SLOT_COUNT = 10;
-
-        constexpr float TOP_MARGIN = 16.0f;
+        constexpr int   SLOT_COUNT = 10;
+        constexpr float MARGIN = 16.0f;
 
         const float total_width = SLOT_COUNT * SLOT_SIZE + (SLOT_COUNT - 1) * SLOT_GAP;
-
         const float start_x = (w - total_width) / 2.0f;
-        const float y = h - SLOT_SIZE - TOP_MARGIN;
+        const float y = h - SLOT_SIZE - MARGIN;
 
-        for (int i = 0; i < SLOT_COUNT; ++i) {
-            const float x = start_x + i * (SLOT_SIZE + SLOT_GAP);
-            layout.hotbar_slots[i] = QRectF(x,y,SLOT_SIZE, SLOT_SIZE);
-        }
+        for (int i = 0; i < SLOT_COUNT; ++i)
+            layout.hotbar_slots[i] = QRectF(start_x + i * (SLOT_SIZE + SLOT_GAP), y, SLOT_SIZE, SLOT_SIZE);
 
-        constexpr float COMBAT_WIDTH = 600.0f;
-        constexpr float COMBAT_HEIGHT = 32.0f;
+        constexpr float COMBAT_W = 600.0f, COMBAT_H = 32.0f;
+        layout.combat_strip = QRectF((w - COMBAT_W) / 2.0f, MARGIN, COMBAT_W, COMBAT_H);
 
-
-        layout.combat_strip = QRectF((w - COMBAT_WIDTH) / 2.0f, TOP_MARGIN, COMBAT_WIDTH,COMBAT_HEIGHT);
-
-        // World-space elements
-        layout.nameplate_rect = QRectF(-24, -30, 48, 14);
-        layout.hp_bar_rect = QRectF(-20, -14, 40, 3);
-
-
+        // plate spans y -24..-10, so the bar (y -14..-11) is inside it
+        layout.nameplate_rect = QRectF(-24, -24, 48, 14);
+        layout.hp_bar_rect    = QRectF(-20, -14, 40, 3);
         return layout;
     }
 };
 
 struct HudTestScene {
-	std::vector<FakeToken> tokens;
-	std::vector<std::string> hotbar;
-	std::string combat_test;
+    std::vector<FakeToken> tokens;
+    std::vector<std::string> hotbar;
+    std::string combat_text;
 
-    // In: a seed and token count
-    // Out: the scene
+    static constexpr float WORLD_W = 1280.0f;
+    static constexpr float WORLD_H = 720.0f;
+
     static HudTestScene make(std::uint32_t seed, std::size_t token_count) {
-        const std::string characters =
-            "0123456789"
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            "abcdefghijklmnopqrstuvwxyz";
+        static const std::string chars =
+            "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
         std::mt19937 rng(seed);
-        HudTestScene newScene{};
-
-        std::size_t strLen = 20;
-        std::uniform_int_distribution<std::size_t> charDist(0, characters.size() - 1);
-        std::uniform_real_distribution<float> floatDist(0, token_count / 2);
+        std::uniform_int_distribution<std::size_t> charDist(0, chars.size() - 1);
+        std::uniform_real_distribution<float> xDist(0.0f, WORLD_W);
+        std::uniform_real_distribution<float> yDist(0.0f, WORLD_H);
         std::uniform_real_distribution<float> hpDist(0.0f, 1.0f);
-        newScene.tokens.reserve(token_count);
+
+        auto random_string = [&](std::size_t len) {
+            std::string s;
+            s.reserve(len);
+            for (std::size_t i = 0; i < len; ++i) s += chars[charDist(rng)];
+            return s;
+        };
+
+        HudTestScene scene{};
+        scene.tokens.reserve(token_count);
         for (std::size_t i = 0; i < token_count; ++i) {
-            float x = floatDist(rng);
-            float y = floatDist(rng);
-            std::string name;
-            name.reserve(strLen);
-            for (std::size_t j = 0; j < strLen; ++j) {
-                name += characters[charDist(rng)];
-            }
-            float hp_frac = hpDist(rng);
-            newScene.tokens.push_back(FakeToken{x,y,name,hp_frac});
+            float x = xDist(rng);
+            float y = yDist(rng);
+            std::string name = random_string(10);
+            float hp = hpDist(rng);
+            scene.tokens.push_back({x, y, std::move(name), hp});
         }
 
-        std::size_t hotLen = 10;
-        newScene.hotbar.reserve(hotLen);
-        for (std::size_t i = 0; i < hotLen; ++i) {
-            std::string item;
-            item.reserve(strLen);
+        scene.hotbar.reserve(10);
+        for (int i = 0; i < 10; ++i)
+            scene.hotbar.push_back(random_string(4));
 
-            for (std::size_t j = 0; j < strLen; ++j) {
-                item += characters[charDist(rng)];
-            }
-            newScene.hotbar.push_back(std::move(item));
-        }
-
-        newScene.combat_test.reserve(strLen);
-        for (std::size_t i = 0; i < strLen; ++i) {
-            newScene.combat_test += characters[charDist(rng)];
-        }
-
-        return newScene;
+        scene.combat_text = random_string(40);
+        return scene;
     }
 };
