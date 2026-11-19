@@ -17,6 +17,7 @@
 #include "frame_stats.hpp"
 #include "qt_hud_overlay.hpp"
 #include "gl_hud_renderer.hpp"
+#include "gl_hud_input.hpp"
 
 class SpikeCanvas : public QOpenGLWidget {
     Q_OBJECT
@@ -45,32 +46,32 @@ protected:
     void paintGL() override;
     void resizeGL(int w, int h) override;
     void wheelEvent(QWheelEvent* event) override;
-    void mousePressEvent(QMouseEvent*) override;
+    void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent*) override;
     void keyPressEvent(QKeyEvent*) override;
 private:
     HudTestScene scene_;
-    Camera       camera_;
-    HudLayout    layout_;
+    Camera camera_;
+    HudLayout layout_;
 
-    FrameStats   stats_;
+    FrameStats stats_;
 
     std::unique_ptr<QtHudOverlay> overlay_;
     GlHudRenderer hud_renderer_;
-    GlHudInput    hud_input_;
+    GlHudInput hud_input_;
 
-    QOpenGLShaderProgram           map_shader_;
-    QOpenGLBuffer                  map_vbo_{QOpenGLBuffer::VertexBuffer};
-    QOpenGLVertexArrayObject       vao_;
+    QOpenGLShaderProgram map_shader_;
+    QOpenGLBuffer map_vbo_{QOpenGLBuffer::VertexBuffer};
+    QOpenGLVertexArrayObject vao_;
     std::unique_ptr<QOpenGLTexture> background_tex_;
     std::unique_ptr<QOpenGLTexture> white_tex_;
     int map_vertex_count_ = 0;
     int background_vertex_count_ = 6;
 
-    HudMode     mode_ = HudMode::None;
+    HudMode mode_ = HudMode::None;
     std::size_t nameplate_count_ = 0;
 
-    bool    dragging_ = false;
+    bool dragging_ = false;
     QPointF last_mouse_pos_;
 
     bool benchmark_running_ = false;

@@ -144,7 +144,13 @@ void SpikeCanvas::wheelEvent(QWheelEvent* event) {
     event->accept();
 }
 
-void SpikeCanvas::mousePressEvent(QMouseEvent*) {}
+void SpikeCanvas::mousePressEvent(QMouseEvent* event) {
+    auto hit = hud_input_.hit_test(event->pos());
+    if (hit == 0) event->ignore();
+    dragging_ = true;
+    last_mouse_pos_ = event->pos();
+    event->accept();
+}
 
 void SpikeCanvas::mouseMoveEvent(QMouseEvent*) {}
 
