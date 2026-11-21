@@ -13,6 +13,8 @@
 #include <QPixmap>
 #include <QImage>
 
+#include <memory>
+
 #include "hud_test_scene.hpp"
 #include "frame_stats.hpp"
 #include "qt_hud_overlay.hpp"
@@ -47,8 +49,9 @@ protected:
     void resizeGL(int w, int h) override;
     void wheelEvent(QWheelEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
-    void mouseMoveEvent(QMouseEvent*) override;
-    void keyPressEvent(QKeyEvent*) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 private:
     HudTestScene scene_;
     Camera camera_;
@@ -70,6 +73,10 @@ private:
 
     HudMode mode_ = HudMode::None;
     std::size_t nameplate_count_ = 0;
+    std::size_t nIndex = 0;
+    std::vector<std::size_t> nameplate_opt{0, 50, 200, 1000};
+
+    int saveCount = 0;
 
     bool dragging_ = false;
     QPointF last_mouse_pos_;
