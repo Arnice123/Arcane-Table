@@ -1,5 +1,6 @@
 #pragma once
 
+#include <qopenglwidget.h>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLBuffer>
@@ -17,11 +18,11 @@
 
 #include "hud_test_scene.hpp"
 #include "frame_stats.hpp"
-#include "qt_hud_overlay.hpp"
 #include "gl_hud_renderer.hpp"
 #include "gl_hud_input.hpp"
+#include "qt_hud_overlay.hpp"
 
-class SpikeCanvas : public QOpenGLWidget {
+class SpikeCanvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
     Q_OBJECT
 public:
     enum class HudMode { None, QtOverlay, GlDrawn };
@@ -80,6 +81,7 @@ private:
 
     bool dragging_ = false;
     QPointF last_mouse_pos_;
+    std::uint32_t hitEleId;
 
     bool benchmark_running_ = false;
 };
