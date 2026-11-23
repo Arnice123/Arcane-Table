@@ -6,7 +6,6 @@
 #include <QMatrix4x4>
 #include <QKeyEvent>
 #include <QObject>
-#include <QImage>
 #include <QColor>
 #include <QRectF>
 #include <QDir>
@@ -34,8 +33,23 @@ SpikeCanvas::SpikeCanvas(QWidget* parent) : QOpenGLWidget(parent), scene_(HudTes
     // the overlay's widgets are children of this canvas.
     overlay_ = std::make_unique<QtHudOverlay>(this, scene_);
     overlay_->show_hud(false);
-    connect(overlay_.get(), &QtHudOverlay::hotbar_slot_clicked,
-            this, [](int slot) { qDebug() << "Qt hotbar slot clicked:" << slot; });
+    connect(overlay_.get(), &QtHudOverlay::hotbar_slot_clicked, this, [](int slot) { qDebug() << "Qt hotbar slot clicked:" << slot; });
+}
+
+void SpikeCanvas::cleanup() {
+    if (!map_vbo_.isCreated()) return;
+
+    background_tex_.reset();
+    white_tex_.reset();
+    map_vbo_.destroy();
+    vao_.destroy();
+    hud_renderer_.shutdown();
+}
+
+SpikeCanvas::~SpikeCanvas() {
+    makeCurrent();
+    cleanup();
+    doneCurrent();
 }
 
 Camera& SpikeCanvas::camera() { return camera_; }
@@ -71,8 +85,9 @@ void SpikeCanvas::set_nameplate_count(std::size_t count) {
 }
 
 void SpikeCanvas::set_zoom(float zoom) {
-    camera_.zoom = std::clamp(zoom, 1.0f, 3.0f);
-
+    float z = std::clamp(zoom, 1.0f, 3.0f);
+    if (camera_.zoom == z) return;
+    camera_.zoom = z;
     if (mode_ == HudMode::QtOverlay) {
         overlay_->apply_zoom(camera_.zoom);
         overlay_->update_positions(camera_, size());
@@ -85,11 +100,11 @@ void SpikeCanvas::set_zoom(float zoom) {
 QImage SpikeCanvas::grab_whole_window() {return window()->grab().toImage();}
 
 void SpikeCanvas::initializeGL() {
-    initializeOpenGLFunctions();
-    map_shader_.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/mapShader.vert");
-    map_shader_.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/mapShader.frag");
-    if (!map_shader_.link())
-        qWarning() << "map shader:" << map_shader_.log();
+    if (!initializeOpenGLFunctions()) qWarning() << "ERROR::initializeOpenGLFunctions";
+    if (!map_shader_.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/mapShader.vert")) qWarning() << "ERROR::VERTEX::SHADER:" << map_shader_.log();
+    if (!map_shader_.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/mapShader.frag")) qWarning() << "ERROR::FRAGMENT::SHADER:" << map_shader_.log();
+    if (!map_shader_.link()) qWarning() << "map shader:" << map_shader_.log();
+
     map_shader_.bind();
     map_shader_.setUniformValue("u_tex", 0);
 
@@ -99,8 +114,7 @@ void SpikeCanvas::initializeGL() {
     push_quad(verts, QRectF(0, 0, 1280, 720), QRectF(0, 0, 1280 / 16.0, 720 / 16.0), Qt::white);
     for (const FakeToken& t : scene_.tokens) {
         QRectF r(t.world_x - 3, t.world_y - 3, 6, 6);
-        // (0,0,1,1) UV on a white texel region, or use a 1x1 white texture
-        push_quad(verts, r, QRectF(0, 0, 0, 0), Qt::white);
+        push_quad(verts, r, QRectF(0, 0, 1, 1), Qt::white);
     }
     map_vertex_count_ = int(verts.size());
 
@@ -140,21 +154,12 @@ void SpikeCanvas::initializeGL() {
     // 5. HUD renderer
     hud_renderer_.init(this);
 
+    layout_ = HudLayout::compute(size());
+
     connect(this, &QOpenGLWidget::frameSwapped, this, [this] {
         stats_.frame_presented();
         if (benchmark_running_)
             tick();
-    });
-
-    // destructor
-    connect(context(), &QOpenGLContext::aboutToBeDestroyed, this, [this] {
-        makeCurrent();
-        background_tex_.reset();
-        white_tex_.reset();
-        map_vbo_.destroy();
-        vao_.destroy();
-        hud_renderer_.shutdown();
-        doneCurrent();
     });
 }
 
@@ -167,11 +172,7 @@ void SpikeCanvas::paintGL() {
     glClear(GL_COLOR_BUFFER_BIT);
 
     // Camera matrix: world -> clip space
-    QMatrix4x4 m;
-    m.ortho(0, width(), height(), 0, -1, 1);
-    m.translate(width() / 2.0f, height() / 2.0f);
-    m.scale(camera_.zoom, camera_.zoom);
-    m.translate(-camera_.pan_x, -camera_.pan_y);
+    QMatrix4x4 m = buildCameraMatrix(camera_, width(), height());
 
     map_shader_.bind();
     map_shader_.setUniformValue("u_camera", m);
@@ -184,22 +185,28 @@ void SpikeCanvas::paintGL() {
     white_tex_->bind();
     glDrawArrays(GL_TRIANGLES, 6, map_vertex_count_ - 6);
 
-    if (mode_ == HudMode::GlDrawn) {
-        hud_renderer_.draw(scene_, camera_, layout_, size(), dpr, nameplate_count_);
-        hud_input_.update_layout(layout_, size());
-    }
+    vao_.release();
+    map_shader_.release();
+
+    if (mode_ == HudMode::GlDrawn) hud_renderer_.draw(scene_, camera_, layout_, size(), nameplate_count_, lastHit);
 
     stats_.end_paint();
 }
 
 void SpikeCanvas::resizeGL(int w, int h) {
     layout_ = HudLayout::compute(size());
-    if (overlay_) overlay_->relayout(layout_,size());
+    if (overlay_) {
+        overlay_->relayout(layout_, size());
+        if (mode_ == HudMode::QtOverlay) {
+            overlay_->update_positions(camera_, size());
+        }
+    }
+    hud_input_.update_layout(layout_, size());
 }
 
 void SpikeCanvas::wheelEvent(QWheelEvent* event) {
     const int dy = event->angleDelta().y();
-    if (dy > 0)      set_zoom(camera_.zoom + 1.0f);
+    if (dy > 0) set_zoom(camera_.zoom + 1.0f);
     else if (dy < 0) set_zoom(camera_.zoom - 1.0f);
     event->accept();
 }
@@ -207,7 +214,8 @@ void SpikeCanvas::wheelEvent(QWheelEvent* event) {
 void SpikeCanvas::mousePressEvent(QMouseEvent* event) {
     if (event->button() != Qt::LeftButton) return;
     if (mode_ == HudMode::GlDrawn) {
-        if (auto hit = hud_input_.hit_test(event->pos()); hit != 0) {
+        auto hit = hud_input_.hit_test(event->pos());
+        if (hit != 0) {
             qDebug() << "HUD element clicked:" << hit;
             return;
         }
@@ -217,21 +225,27 @@ void SpikeCanvas::mousePressEvent(QMouseEvent* event) {
 }
 
 void SpikeCanvas::mouseReleaseEvent(QMouseEvent *event) {
-    dragging_ = false;
+    if (event->button() == Qt::LeftButton) dragging_ = false;
 }
 
 void SpikeCanvas::mouseMoveEvent(QMouseEvent* event) {
+    if (benchmark_running_) return;
     auto pos = event->pos();
     if (dragging_) {
 
         camera_.pan_x += (last_mouse_pos_.x() - pos.x()) / camera_.zoom;
         camera_.pan_y += (last_mouse_pos_.y() - pos.y()) / camera_.zoom;
+
+        if (mode_ == HudMode::QtOverlay) overlay_->update_positions(camera_, size());
     }
-    if (mode_ == HudMode::GlDrawn) hud_input_.update_hover(pos);
-    else if (mode_ == HudMode::QtOverlay) overlay_->update_positions(camera_, size());
+    if (mode_ == HudMode::GlDrawn) {
+        const auto before = lastHit;
+        lastHit = hud_input_.hit_test(pos);
+        if (lastHit != before) update();
+    }
     last_mouse_pos_ = pos;
     event->accept();
-    update();
+
 }
 
 static void saveImageToFolder(const QImage &image, const QString &fileName) {
@@ -245,7 +259,7 @@ static void saveImageToFolder(const QImage &image, const QString &fileName) {
     }
 
     // 3. Construct the full file path and save
-    QString fullPath = dir.filePath(fileName); // e.g., ".../images/output.png"
+    QString fullPath = dir.filePath(fileName);
 
     if (image.save(fullPath)) {
         qDebug() << "Saved successfully to:" << fullPath;
@@ -257,39 +271,52 @@ static void saveImageToFolder(const QImage &image, const QString &fileName) {
 // 1/2/3 switch HUD mode, N cycles nameplate counts, Z cycles zoom, B starts the benchmark, and G saves a screenshot
 // ---- keys: no logic of their own ----
 void SpikeCanvas::keyPressEvent(QKeyEvent* event) {
-    switch (event->key()) {
-    case Qt::Key_1: set_hud_mode(HudMode::None);       break;
-    case Qt::Key_2: set_hud_mode(HudMode::QtOverlay);  break;
-    case Qt::Key_3: set_hud_mode(HudMode::GlDrawn);    break;
-
-    case Qt::Key_N:
-        nIndex = (nIndex + 1) % nameplate_opt.size();
-        set_nameplate_count(nameplate_opt[nIndex]);
-        break;
-
-    case Qt::Key_Z:
-        set_zoom(float(int(camera_.zoom) % 3 + 1));   // 1 -> 2 -> 3 -> 1
-        break;
-
-    case Qt::Key_B:
+    if (event->key() == Qt::Key_B) {
         benchmark_running_ = !benchmark_running_;
-        if (benchmark_running_) tick();
-        break;
+        if (benchmark_running_) {
+            stats_.reset();
+            tick();
+        }
+        else if (!benchmark_running_) {
+            const FrameStats::Summary summary = stats_.summary();
+            qDebug() << "Summary(frame_ms_median: " << summary.frame_ms_median << ", frame_ms_p95: " << summary.frame_ms_p95
+                     << ", paint_ms_median: " << summary.paint_ms_median << ", paint_ms_p95: " << summary.paint_ms_p95
+                     << ", frames: " << summary.frames << ")";
+            stats_.reset();
+        }
+        return;
+    }
 
-    case Qt::Key_G:
-        saveImageToFolder(grab_whole_window(),"output" + QString::number(++saveCount) + ".png");
-        break;
+    if (!benchmark_running_) {
+        switch (event->key()) {
+        case Qt::Key_1: set_hud_mode(HudMode::None);       break;
+        case Qt::Key_2: set_hud_mode(HudMode::QtOverlay);  break;
+        case Qt::Key_3: set_hud_mode(HudMode::GlDrawn);    break;
 
-    default:
-        QOpenGLWidget::keyPressEvent(event);
+        case Qt::Key_N:
+            nIndex = (nIndex + 1) % nameplate_opt.size();
+            set_nameplate_count(nameplate_opt[nIndex]);
+            break;
+
+        case Qt::Key_Z:
+            set_zoom(float(int(camera_.zoom) % 3 + 1));   // 1 -> 2 -> 3 -> 1
+            break;
+
+        case Qt::Key_G:
+            saveImageToFolder(grab_whole_window(),"output" + QString::number(++saveCount) + ".png");
+            break;
+
+        default:
+            QOpenGLWidget::keyPressEvent(event);
+        }
     }
 }
 
 void SpikeCanvas::tick() {
     if (benchmark_running_) {
         stats_.begin_frame();
-        camera_.pan_x += 0.1f;
-        camera_.pan_x -= 0.1f;
+        camera_.pan_x += pan_dir_ * 2.0f;
+        if (camera_.pan_x > 900.0f || camera_.pan_x < 380.0f) pan_dir_ = -pan_dir_;
         if (mode_ == HudMode::QtOverlay) overlay_->update_positions(camera_, size());
         update();
     }

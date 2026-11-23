@@ -3,14 +3,26 @@
 #include <algorithm>
 #include <cmath>
 
-void FrameStats::begin_frame() { frame_start_time.start(); }
+void FrameStats::begin_frame() {
+    frame_start_time.start();
+    frameFlag = true;
+}
 void FrameStats::frame_presented() {
-    frame_time_diff.push_back(frame_start_time.nsecsElapsed() / 1'000'000.0);
+    if (frameFlag) {
+        frame_time_diff.push_back(frame_start_time.nsecsElapsed() / 1'000'000.0);
+        frameFlag = false;
+    }
 }
 
-void FrameStats::begin_paint() { paint_start_time.start(); }
+void FrameStats::begin_paint() {
+    paint_start_time.start();
+    paintFlag = true;
+}
 void FrameStats::end_paint() {
-    paint_time_diff.push_back(paint_start_time.nsecsElapsed() / 1'000'000.0);
+    if (paintFlag) {
+        paint_time_diff.push_back(paint_start_time.nsecsElapsed() / 1'000'000.0);
+        paintFlag = false;
+    }
 }
 
 void FrameStats::reset() {

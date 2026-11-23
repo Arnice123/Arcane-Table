@@ -24,6 +24,8 @@ endif()
 
 add_executable(arcane_spike_s2_hud ${sources})
 
+qt_add_resources(arcane_spike_s2_hud "shaders" PREFIX "/" FILES mapShader.frag mapShader.vert)
+
 target_link_libraries(arcane_spike_s2_hud PRIVATE
   Qt6::Widgets
   Qt6::OpenGL

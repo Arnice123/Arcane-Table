@@ -6,8 +6,16 @@
 
 class GlHudInput {
 public:
-    using ElementId = std::uint32_t;                       // 0 = nothing, map click
-    void update_layout(const HudLayout& layout, QSize canvas_logical);   // rebuild the list of clickable rectangles
-    ElementId hit_test(QPoint pos) const;                  // click position -> id
-    ElementId update_hover(QPoint pos);                    // call on mouse move; returns the newly hovered id (renderer draws a highlight)
+    // Identifies a HUD element. 0 means "nothing: the click belongs to the map".
+    using ElementId = std::uint32_t;
+
+    // In: the same layout the renderer used.
+    // Outcome: hit-testing data updated
+    void update_layout(const HudLayout& layout, QSize canvas_logical);
+
+    // In: a position.
+    // Out: an element id, or 0 for no hit.
+    ElementId hit_test(QPoint pos) const;
+private:
+    std::vector<std::pair<QRectF, ElementId>> entries;
 };

@@ -10,6 +10,7 @@
 #include <QTextStream>
 #include <QStringList>
 #include <QList>
+#include <QDebug>
 
 class FrameStats {
 public:
@@ -26,9 +27,13 @@ public:
         double paint_ms_median, paint_ms_p95;   // where the time went
         std::size_t frames;
     };
+
     Summary summary() const;
     void append_csv(const QString& path, const QString& label) const;
 private:
+    bool frameFlag = false;
+    bool paintFlag = false;
+
     QElapsedTimer frame_start_time;
     QElapsedTimer paint_start_time;
 

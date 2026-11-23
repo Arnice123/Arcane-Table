@@ -28,6 +28,8 @@ public:
     enum class HudMode { None, QtOverlay, GlDrawn };
 
     explicit SpikeCanvas(QWidget* parent = nullptr);
+    ~SpikeCanvas() override;
+
     void set_hud_mode(HudMode mode);
 
     // 0, 50, 200, 1000
@@ -54,6 +56,8 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent* event) override;
 private:
+    void cleanup();
+
     HudTestScene scene_;
     Camera camera_;
     HudLayout layout_;
@@ -77,11 +81,14 @@ private:
     std::size_t nIndex = 0;
     std::vector<std::size_t> nameplate_opt{0, 50, 200, 1000};
 
+    GlHudInput::ElementId lastHit = 0;
+
     int saveCount = 0;
+
+    float pan_dir_ = 1.0f;
 
     bool dragging_ = false;
     QPointF last_mouse_pos_;
-    std::uint32_t hitEleId;
 
     bool benchmark_running_ = false;
 };
