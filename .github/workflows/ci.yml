@@ -1,0 +1,197 @@
+# Arcane Table CI (spike S10, ADR 0003)
+#
+# vcpkg for every library except Qt. Qt comes from aqtinstall (via install-qt-action).
+# vcpkg binary cache: the "files" provider in a folder, saved and restored with
+# actions/cache. (vcpkg's own GitHub Actions cache backend, x-gha, has been removed.)
+#
+# Timings for the ADR: every job writes a table to its run summary. Do one run with
+# an empty cache (cold): Actions > Caches > delete the vcpkg-* entries, then re-run.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.11.*"
+  QT_QPA_PLATFORM: offscreen   
+  VCPKG_DISABLE_METRICS: "1"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc
+            os: ubuntu-24.04
+            preset: ci-linux-gcc
+            triplet: x64-linux
+            qt_host: linux
+            qt_arch: linux_gcc_64
+            qt_tools: ""
+          - name: windows-mingw
+            os: windows-2022
+            preset: ci-windows-mingw
+            triplet: x64-mingw-dynamic
+            qt_host: windows
+            qt_arch: win64_mingw
+            # Qt's own MinGW, so Qt and every vcpkg library use the same compiler.
+            # Check the name for your Qt version: `aqt list-tool windows desktop`
+            qt_tools: "tools_mingw1310 tools_ninja"
+          # Optional: add last (see ARCH-06 "cut order").
+          - name: windows-msvc
+            os: windows-2022
+            preset: ci-windows-msvc
+            triplet: x64-windows
+            qt_host: windows
+            qt_arch: win64_msvc2022_64
+            qt_tools: "tools_ninja"
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Record start time and set paths
+        run: |
+          echo "T_START=$(date +%s)" >> "$GITHUB_ENV"
+          # Forward slashes on Windows too (cygpath -m), because CMake reads
+          # VCPKG_ROOT into the toolchain path from the preset.
+          BASE=$(cd "$GITHUB_WORKSPACE/.." && pwd)
+          [ "$RUNNER_OS" = "Windows" ] && BASE=$(cygpath -m "$BASE")
+          echo "VCPKG_ROOT=$BASE/vcpkg" >> "$GITHUB_ENV"
+          echo "VCPKG_CACHE_DIR=$BASE/vcpkg-cache" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      # ---------- Qt (not from vcpkg) ----------
+      - name: Install Linux system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: ${{ matrix.qt_host }}
+          target: desktop
+          arch: ${{ matrix.qt_arch }}
+          tools: ${{ matrix.qt_tools }}
+          cache: true
+
+      - name: Put Qt's MinGW and Ninja on PATH
+        if: runner.os == 'Windows'
+        run: |
+          # IQTA_TOOLS is set by install-qt-action and points at Qt/Tools
+          ls "$IQTA_TOOLS"
+          for d in "$IQTA_TOOLS"/mingw*_64/bin "$IQTA_TOOLS"/Ninja; do
+            [ -d "$d" ] && cygpath -w "$d" >> "$GITHUB_PATH"
+          done
+
+      - name: Set up MSVC environment
+        if: matrix.name == 'windows-msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Record Qt time
+        run: echo "T_QT=$(date +%s)" >> "$GITHUB_ENV"
+
+      # ---------- vcpkg at the pinned baseline ----------
+      - name: Fetch vcpkg at the manifest's builtin-baseline
+        run: |
+          BASELINE=$(python -c "import json;print(json.load(open('vcpkg.json'))['builtin-baseline'])")
+          echo "vcpkg baseline: $BASELINE"
+          git init -q "$VCPKG_ROOT"
+          cd "$VCPKG_ROOT"
+          git remote add origin https://github.com/microsoft/vcpkg.git
+          git fetch -q --depth 1 origin "$BASELINE"
+          git checkout -q FETCH_HEAD
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmd //c bootstrap-vcpkg.bat -disableMetrics
+          else
+            ./bootstrap-vcpkg.sh -disableMetrics
+          fi
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.VCPKG_CACHE_DIR }}
+          key: vcpkg-${{ matrix.triplet }}-${{ matrix.os }}-${{ hashFiles('vcpkg.json') }}
+          # A partial match still helps: vcpkg reuses every package whose ABI hash matches.
+          restore-keys: |
+            vcpkg-${{ matrix.triplet }}-${{ matrix.os }}-
+
+      - name: Point vcpkg at the cache folder
+        run: |
+          mkdir -p "$VCPKG_CACHE_DIR"
+          echo "VCPKG_BINARY_SOURCES=clear;files,$VCPKG_CACHE_DIR,readwrite" >> "$GITHUB_ENV"
+          echo "T_VCPKG=$(date +%s)" >> "$GITHUB_ENV"
+
+      # ---------- configure / build / test ----------
+      - name: Configure (installs vcpkg dependencies)
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Record configure time
+        run: echo "T_CONFIGURE=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Upload vcpkg logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcpkg-logs-${{ matrix.name }}
+          path: |
+            build/${{ matrix.preset }}/vcpkg-manifest-install.log
+            ${{ env.VCPKG_ROOT }}/buildtrees/**/*.log
+          if-no-files-found: ignore
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
+
+      - name: Record build time
+        run: echo "T_BUILD=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+      # Save even when tests fail, so the next run is warm. Skip if the key already exists.
+      - name: Save vcpkg binary cache
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.VCPKG_CACHE_DIR }}
+          key: vcpkg-${{ matrix.triplet }}-${{ matrix.os }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Timing summary (for ADR 0003)
+        if: always()
+        run: |
+          now=$(date +%s)
+          d() { [ -n "$2" ] && [ -n "$1" ] && echo "$(( $2 - $1 ))" || echo "n/a"; }
+          {
+            echo "### ${{ matrix.name }}"
+            echo ""
+            echo "| Measure | Value |"
+            echo "|---|---|"
+            echo "| Cache | ${{ steps.vcpkg-cache.outputs.cache-hit == 'true' && 'exact hit (warm)' || steps.vcpkg-cache.outputs.cache-matched-key != '' && 'partial hit' || 'miss (cold)' }} |"
+            echo "| Qt provisioning (s) | $(d "$T_START" "$T_QT") |"
+            echo "| Configure incl. vcpkg install (s) | $(d "$T_VCPKG" "$T_CONFIGURE") |"
+            echo "| Build (s) | $(d "$T_CONFIGURE" "$T_BUILD") |"
+            echo "| Whole job so far (s) | $(d "$T_START" "$now") |"
+            echo "| vcpkg cache size | $(du -sh "$VCPKG_CACHE_DIR" 2>/dev/null | cut -f1) |"
+          } >> "$GITHUB_STEP_SUMMARY"

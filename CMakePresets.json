@@ -3,14 +3,65 @@
   "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
   "configurePresets": [
     {
+      "name": "vcpkg",
+      "hidden": true,
+      "description": "vcpkg manifest mode. VCPKG_ROOT must point to a vcpkg checkout. toolchainFile is applied before project(), which is what vcpkg needs.",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "VCPKG_MANIFEST_MODE": "ON",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/build/vcpkg_installed"
+      }
+    },
+    {
       "name": "base",
       "hidden": true,
+      "inherits": "vcpkg",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "$env{QT_ROOT_DIR}",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
+    {
+      "name": "spikes",
+      "hidden": true,
+      "description": "Builds tools/spikes and installs the 'spikes' vcpkg feature (sol2, protobuf, flatbuffers, benchmark).",
+      "cacheVariables": {
+        "ARCANE_BUILD_SPIKES": "ON",
+        "VCPKG_MANIFEST_FEATURES": "spikes"
+      }
+    },
+
+    {
+      "name": "triplet-linux",
+      "hidden": true,
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": { "VCPKG_TARGET_TRIPLET": "x64-linux" }
+    },
+    {
+      "name": "triplet-mingw",
+      "hidden": true,
+      "description": "Host triplet too: otherwise vcpkg builds host tools (protoc, flatc) with MSVC, which a MinGW-only machine doesn't have.",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-dynamic",
+        "VCPKG_HOST_TRIPLET": "x64-mingw-dynamic",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "triplet-msvc",
+      "hidden": true,
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    },
+
     {
       "name": "dev-debug",
       "displayName": "Dev: Debug",
@@ -35,10 +86,9 @@
     {
       "name": "spikes-release",
       "displayName": "Spikes: Release + technical-spike prototypes (Qt required)",
-      "inherits": "base",
+      "inherits": ["spikes", "base"],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "ARCANE_BUILD_SPIKES": "ON",
         "ARCANE_BUILD_CLIENT": "ON"
       }
     },
@@ -53,10 +103,33 @@
         "ARCANE_SANITIZE": "address"
       }
     },
+
+    {
+      "name": "dev-mingw-debug",
+      "displayName": "Dev: Debug (Windows MinGW)",
+      "inherits": ["triplet-mingw", "base"],
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "dev-mingw-release",
+      "displayName": "Dev: Release (Windows MinGW)",
+      "inherits": ["triplet-mingw", "base"],
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "dev-mingw-spikes",
+      "displayName": "Spikes: Release + technical-spike prototypes (Windows MinGW, Qt required)",
+      "inherits": ["spikes", "triplet-mingw", "base"],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ARCANE_BUILD_CLIENT": "ON"
+      }
+    },
+
     {
       "name": "ci-base",
       "hidden": true,
-      "inherits": "base",
+      "inherits": ["spikes", "base"],
       "cacheVariables": {
         "ARCANE_WARNINGS_AS_ERRORS": "ON"
       }
@@ -64,7 +137,7 @@
     {
       "name": "ci-linux-gcc",
       "displayName": "CI: Linux GCC",
-      "inherits": "ci-base",
+      "inherits": ["triplet-linux", "ci-base"],
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -74,7 +147,7 @@
     {
       "name": "ci-linux-clang",
       "displayName": "CI: Linux Clang",
-      "inherits": "ci-base",
+      "inherits": ["triplet-linux", "ci-base"],
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -82,13 +155,21 @@
       }
     },
     {
-      "name": "ci-windows-msvc",
-      "displayName": "CI: Windows MSVC (run from a VS developer prompt)",
-      "inherits": "ci-base",
+      "name": "ci-windows-mingw",
+      "displayName": "CI: Windows MinGW (Qt's MinGW on PATH)",
+      "inherits": ["triplet-mingw", "ci-base"],
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_CXX_COMPILER": "cl"
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "ci-windows-msvc",
+      "displayName": "CI: Windows MSVC (run from a VS developer prompt)",
+      "inherits": ["triplet-msvc", "ci-base"],
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
       }
     }
   ],
@@ -98,45 +179,37 @@
     { "name": "release", "configurePreset": "release" },
     { "name": "spikes-release", "configurePreset": "spikes-release" },
     { "name": "dev-fuzz", "configurePreset": "dev-fuzz" },
+    { "name": "dev-mingw-debug", "configurePreset": "dev-mingw-debug" },
+    { "name": "dev-mingw-release", "configurePreset": "dev-mingw-release" },
+    { "name": "dev-mingw-spikes", "configurePreset": "dev-mingw-spikes" },
     { "name": "ci-linux-gcc", "configurePreset": "ci-linux-gcc" },
     { "name": "ci-linux-clang", "configurePreset": "ci-linux-clang" },
+    { "name": "ci-windows-mingw", "configurePreset": "ci-windows-mingw" },
     { "name": "ci-windows-msvc", "configurePreset": "ci-windows-msvc" }
   ],
   "testPresets": [
     {
-      "name": "dev-debug",
-      "configurePreset": "dev-debug",
+      "name": "test-base",
+      "hidden": true,
       "output": { "outputOnFailure": true }
     },
     {
-      "name": "dev-asan",
-      "configurePreset": "dev-asan",
-      "output": { "outputOnFailure": true }
+      "name": "ci-test-base",
+      "hidden": true,
+      "inherits": "test-base",
+      "execution": { "noTestsAction": "error" }
     },
-    {
-      "name": "release",
-      "configurePreset": "release",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "dev-fuzz",
-      "configurePreset": "dev-fuzz",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "ci-linux-gcc",
-      "configurePreset": "ci-linux-gcc",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "ci-linux-clang",
-      "configurePreset": "ci-linux-clang",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "ci-windows-msvc",
-      "configurePreset": "ci-windows-msvc",
-      "output": { "outputOnFailure": true }
-    }
+    { "name": "dev-debug", "inherits": "test-base", "configurePreset": "dev-debug" },
+    { "name": "dev-asan", "inherits": "test-base", "configurePreset": "dev-asan" },
+    { "name": "release", "inherits": "test-base", "configurePreset": "release" },
+    { "name": "spikes-release", "inherits": "test-base", "configurePreset": "spikes-release" },
+    { "name": "dev-fuzz", "inherits": "test-base", "configurePreset": "dev-fuzz" },
+    { "name": "dev-mingw-debug", "inherits": "test-base", "configurePreset": "dev-mingw-debug" },
+    { "name": "dev-mingw-release", "inherits": "test-base", "configurePreset": "dev-mingw-release" },
+    { "name": "dev-mingw-spikes", "inherits": "test-base", "configurePreset": "dev-mingw-spikes" },
+    { "name": "ci-linux-gcc", "inherits": "ci-test-base", "configurePreset": "ci-linux-gcc" },
+    { "name": "ci-linux-clang", "inherits": "ci-test-base", "configurePreset": "ci-linux-clang" },
+    { "name": "ci-windows-mingw", "inherits": "ci-test-base", "configurePreset": "ci-windows-mingw" },
+    { "name": "ci-windows-msvc", "inherits": "ci-test-base", "configurePreset": "ci-windows-msvc" }
   ]
 }
