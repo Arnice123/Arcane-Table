@@ -10,3 +10,4 @@
 # folder with its own CMakeLists.txt and listing it below.
 
 add_subdirectory(s2_hud)   # ARCH-05: Qt overlay widgets vs GL-drawn HUD
+add_subdirectory(s10_deps)

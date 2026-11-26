@@ -6,6 +6,15 @@ project(ArcaneTable
   LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(ArcaneDeps)
+arcane_find_core_dependencies()
+
+if(WIN32)
+    set_tests_properties(ui.smoke PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+endif()
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
   message(FATAL_ERROR
